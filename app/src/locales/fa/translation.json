@@ -950,7 +950,9 @@
     "menu_refresh": "بروزرسانی",
     "menu_show_monitors": "نمایش مانیتورها",
     "tile_error": "کاشی ناموفق",
-    "alarm_status": "آلارم روی {{monitor}}"
+    "alarm_status": "آلارم روی {{monitor}}",
+    "template": "Templates",
+    "template_pick_camera": "Right-click to choose a camera"
   },
   "notification_history": {
     "title": "اعلان‌ها",

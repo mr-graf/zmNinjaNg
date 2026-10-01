@@ -950,7 +950,9 @@
     "menu_refresh": "Refresh",
     "menu_show_monitors": "Show monitors",
     "tile_error": "Tile failed",
-    "alarm_status": "Alarm on {{monitor}}"
+    "alarm_status": "Alarm on {{monitor}}",
+    "template": "Templates",
+    "template_pick_camera": "Right-click to choose a camera"
   },
   "notification_history": {
     "title": "Notifications",

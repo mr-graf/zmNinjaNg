@@ -1,12 +1,6 @@
 /**
  * Montage grid rendering: All-mode per-profile error strips, and the
  * grouped/ungrouped tile grid with its stream-cap overflow message.
- *
- * Extracted from Montage.tsx (refs #337, Phase 4 Task 1 fix round 1 - C2:
- * the page file had grown past the 400-line guideline). Behavior-preserving;
- * Montage.tsx still owns all state and the profile/event-count resolution
- * (single vs All mode), passed in here as plain resolver callbacks so this
- * component stays agnostic of that branching.
  */
 
 import type { ReactNode } from 'react';
@@ -29,11 +23,11 @@ import { MontageMonitor } from '../monitors/MontageMonitor';
 import { MontageTileErrorBoundary } from './MontageTileErrorBoundary';
 import { ProfileSectionList } from '../profiles/ProfileSectionList';
 import { internalColsForCols, tileIdFor, type MontageTileMonitorData } from './hooks/useMontageGrid';
+import { TemplateGrid } from './TemplateGrid';
+
 
 const WrappedGridLayout = WidthProvider(GridLayout);
 
-/** One montage tile's render data. profileId/profileChip are set only in
- *  All mode (see useScopedMonitors), mirroring Monitors.tsx's MonitorGridItem. */
 export interface MontageTileItem extends MontageTileMonitorData {
   profileChip?: string;
 }
@@ -47,8 +41,6 @@ interface MontageErrorStripsProps {
   onRetry: (profileId: ProfileId) => void;
 }
 
-/** Per-profile error strips, All mode only (see visibleErrors in Montage.tsx
- *  - zero-data suppression already applied by the caller). */
 export function MontageErrorStrips({ errors, onRetry }: MontageErrorStripsProps) {
   const { t } = useTranslation();
   if (errors.length === 0) return null;
@@ -62,10 +54,6 @@ export function MontageErrorStrips({ errors, onRetry }: MontageErrorStripsProps)
         >
           <ErrorBanner
             className="flex-1"
-            // "{name}: {message}" is a raw template join, not a locale key -
-            // deliberately mirrors Monitors.tsx's own All-mode error strip
-            // (same join, same fallbackKey), so this stays consistent with
-            // the sibling page rather than diverging with a new pattern.
             message={`${err.profileName}: ${resolveQueryError(err.error, t, { fallbackKey: 'monitors.failed_to_load' })}`}
           />
           <Button
@@ -85,9 +73,15 @@ export function MontageErrorStrips({ errors, onRetry }: MontageErrorStripsProps)
 interface MontageGridSectionsProps {
   cappedMonitors: MontageTileItem[];
   groupedSections: MontageGroupedSections | null;
-  /** The aggregate the sections belong to; scopes their collapse state. Null
-   *  only before a profile is current, when there are no sections either. */
   scopeId: ProfileId | null;
+  
+  /** DRAFT: active template id. When set, the grid renders placeholder
+   *  slots for the template's ids instead of the real monitor tiles. */
+  activeTemplate?: string | null;
+  
+  /** DRAFT: exact rect of the scroll container, used to position the template grid. */
+  scrollRect?: { top: number; left: number; width: number; height: number };
+    
   layout: Layout[];
   gridCols: number;
   isEditMode: boolean;
@@ -104,38 +98,22 @@ interface MontageGridSectionsProps {
   accessToken: string | null;
   isMonitorPinned: (tileId: string) => boolean;
   onPinToggle: (tileId: string) => void;
-  /** The tile's owning profile: its own server in All mode (profileId set),
-   *  the page's current profile in single mode (profileId undefined). */
   resolveOwnerProfile: (profileId: ProfileId | undefined) => Profile | null;
   resolveNewEventCount: (item: MontageTileItem) => number | undefined;
   resolveNewestEventAt: (item: MontageTileItem) => string | null | undefined;
-  /** All-mode "reduced" stream tuning: every tile asks its server for a
-   *  cheaper stream (refs #337). Always false in single mode. */
   reduceStream: boolean;
-  /** All-mode pause-while-hidden: every tile stops streaming (refs #337).
-   *  Always false in single mode. */
   paused: boolean;
-  /** All-mode viewport gating: this tile is out of view and must hold no
-   *  connection (refs #337). Composes with `paused` - either reason stops the
-   *  tile. Always false in single mode. */
   isTileGated: (tileId: string) => boolean;
-  /** Hands the tile's element to the page's one IntersectionObserver, which
-   *  is what answers `isTileGated`. Records the element whether gating is on
-   *  or off - only the observing waits for the setting, so turning it on
-   *  mid-session finds every tile already registered. */
   registerTile: (tileId: string) => (el: HTMLElement | null) => void;
-  /** All-mode idle downgrade: 'snapshot' once the user has left the page
-   *  alone long enough (refs #337). Undefined leaves each tile on its own
-   *  Streaming Mode. */
   forceViewMode?: 'streaming' | 'snapshot';
 }
 
-/** Grouped-by-server sections when the toggle is on (All mode only), or one
- *  combined grid otherwise, plus the stream-cap overflow message. */
 export function MontageGridSections({
   cappedMonitors,
   groupedSections,
   scopeId,
+  activeTemplate,
+  scrollRect,
   layout,
   gridCols,
   isEditMode,
@@ -163,11 +141,6 @@ export function MontageGridSections({
 }: MontageGridSectionsProps) {
   const { t } = useTranslation();
 
-  // layout is one flat array covering every tile (single WrappedGridLayout in
-  // the ungrouped case); grouped rendering slices it per profile so each
-  // server gets its own independent grid region. x stays within
-  // internalColsForCols(gridCols) regardless of subset size, so a section's
-  // own vertical compaction is all that changes per instance.
   const layoutByTileId = new Map(layout.map((item) => [item.i, item]));
   const globalIndexByTileId = new Map(cappedMonitors.map((item, i) => [tileIdFor(item), i]));
 
@@ -176,8 +149,12 @@ export function MontageGridSections({
     rowHeight: GRID_LAYOUT.montageRowHeight,
     margin: [0, 0] as [number, number],
     containerPadding: [0, 0] as [number, number],
-    compactType: 'vertical' as const,
-    preventCollision: false,
+    // DRAFT: templates need free positioning. RGL's compactType only accepts
+    // 'vertical' | 'horizontal', so we cannot pass null. Instead we set
+    // `compactType` to 'horizontal' for templates - horizontal compaction
+    // does not move items vertically, which is what we need.
+    compactType: activeTemplate ? ('horizontal' as const) : ('vertical' as const),
+    preventCollision: true,
     isResizable: isEditMode,
     isDraggable: isEditMode,
     resizeHandles: ['se', 'sw', 'ne', 'nw'] as Array<'s' | 'w' | 'e' | 'n' | 'sw' | 'nw' | 'se' | 'ne'>,
@@ -210,13 +187,6 @@ export function MontageGridSections({
         )}
         onKeyDown={handleKeyClick}
       >
-        {/* The element viewport gating observes. It has to be INSIDE the grid
-            item rather than being the item itself: react-grid-layout clones
-            every child with a ref of its own, which replaces any ref put on
-            that element, so a ref one level up is never called. This div
-            fills the item, so its box is the tile's real position, and the
-            item is the thing react-grid-layout moves - a drag or resize
-            changes this box with it. */}
         <div ref={registerTile(tileId)} className="w-full h-full">
           <MontageTileErrorBoundary monitorId={Monitor.Id} monitorName={Monitor.Name}>
             <MontageMonitor
@@ -236,9 +206,6 @@ export function MontageGridSections({
               newEventCount={resolveNewEventCount(item)}
               newestEventAt={resolveNewestEventAt(item)}
               reduceStream={reduceStream}
-              // Out of view stops the tile for the same reason a hidden page
-              // does, so the two share one prop rather than the player
-              // learning a second way to be off.
               paused={paused || isTileGated(tileId)}
               forceViewMode={forceViewMode}
             />
@@ -253,6 +220,7 @@ export function MontageGridSections({
       <div
         className={cn(
           'w-full',
+          activeTemplate && 'relative flex-1',
           isFullscreen && 'pl-[var(--sai-left,env(safe-area-inset-left))] pr-[var(--sai-right,env(safe-area-inset-right))]'
         )}
         data-testid="montage-grid"
@@ -264,8 +232,6 @@ export function MontageGridSections({
             scopeId={scopeId}
             className="space-y-6"
             renderItems={(items) => {
-              // Collapsing unmounts the section's tiles, which stops those
-              // streams - the point of folding a server away (refs #503).
               const sectionLayout = items
                 .map((item) => layoutByTileId.get(tileIdFor(item)))
                 .filter((item): item is Layout => !!item);
@@ -276,7 +242,30 @@ export function MontageGridSections({
               );
             }}
           />
+    
+
+        ) : activeTemplate && scrollRect ? (
+          <div
+            className="fixed z-30"
+            style={{
+              top: scrollRect.top,
+              left: scrollRect.left,
+              right: 0,
+              bottom: 0,
+            }}
+          >
+            <TemplateGrid
+              layout={layout}
+              internalCols={internalColsForCols(gridCols)}
+              totalRows={60}
+              isFullscreen={isFullscreen}
+              onSlotContextMenu={(_slotId) => {
+                // TODO: open camera picker
+              }}
+            />
+          </div>
         ) : (
+                    
           <WrappedGridLayout layout={layout} {...sharedGridLayoutProps}>
             {cappedMonitors.map(renderTile)}
           </WrappedGridLayout>

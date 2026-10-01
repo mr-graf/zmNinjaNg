@@ -950,7 +950,9 @@
     "menu_refresh": "Aggiorna",
     "menu_show_monitors": "Mostra monitor",
     "tile_error": "Riquadro non riuscito",
-    "alarm_status": "Allarme su {{monitor}}"
+    "alarm_status": "Allarme su {{monitor}}",
+    "template": "Templates",
+    "template_pick_camera": "Right-click to choose a camera"
   },
   "notification_history": {
     "title": "Notifiche",

@@ -970,7 +970,9 @@
     "menu_refresh": "Обновить",
     "menu_show_monitors": "Показать мониторы",
     "tile_error": "Ошибка при размещении плитки",
-    "alarm_status": "Тревога на {{monitor}}"
+    "alarm_status": "Тревога на {{monitor}}",
+    "template": "Шаблоны",
+    "template_pick_camera": "Выбери камеру"
   },
   "notification_history": {
     "title": "Уведомления",

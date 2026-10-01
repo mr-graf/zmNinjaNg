@@ -950,7 +950,9 @@
     "menu_refresh": "Aktualisieren",
     "menu_show_monitors": "Monitore",
     "tile_error": "Kachelfehler",
-    "alarm_status": "Alarm bei {{monitor}}"
+    "alarm_status": "Alarm bei {{monitor}}",
+    "template": "Templates",
+    "template_pick_camera": "Right-click to choose a camera"
   },
   "notification_history": {
     "title": "Benachrichtigungen",

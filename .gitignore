@@ -62,3 +62,7 @@ vendor/bundle/
 
 # LlamaKit SPM build artifacts
 app/ios/App/LlamaKit/.build/
+
+# Local editor backups (added during template draft)
+*.org
+*.work1

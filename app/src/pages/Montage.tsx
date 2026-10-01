@@ -17,7 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTvKeyHandler } from '../hooks/useTvKeyHandler';
 import { useTvMode } from '../hooks/useTvMode';
 import { Button } from '../components/ui/button';
-import { Video, Maximize, Pencil, ArrowLeftRight, Layers } from 'lucide-react';
+import { Video, Maximize, Pencil, ArrowLeftRight, Layers, LayoutTemplate } from 'lucide-react';
 import { RefreshButton } from '../components/common/RefreshButton';
 import { ErrorBanner } from '../components/ui/query-state';
 import { resolveQueryError } from '../lib/query/query-error';
@@ -68,23 +68,14 @@ export default function Montage() {
   const { currentProfile, settings, isAllMode } = useCurrentProfile();
   const authSlice = useAuthSlice(currentProfile?.id ?? null);
   const accessToken = authSlice.accessToken;
-  // Settings-update target: the real profile id in single mode, the active
-  // aggregate's id while aggregating (currentProfile stays null there) - same
-  // resolution Monitors.tsx uses for its server-grouping toggle.
   const currentProfileId = useProfileStore((state) => state.currentProfileId);
 
   const scope = useProfileScope();
-  // Owning-profile lookup for All-mode tiles: MontageMonitor needs the real
-  // Profile object (zmVersion, settings, go2rtcUrl all key off its id), not
-  // just the id useScopedMonitors tags each tile with.
   const profilesById = useMemo(
     () => new Map((scope?.profiles ?? []).map((p) => [p.id, p])),
     [scope]
   );
 
-  // Single code path for both modes, same as Monitors.tsx: one profile in
-  // single mode, N in All mode, sharing useMonitors' queryKeys.monitors(id)
-  // cache entry. Already filters to enabled monitors (refs #337).
   const {
     monitors: scopedMonitors,
     errors: profileErrors,
@@ -94,14 +85,10 @@ export default function Montage() {
 
   const updateSettings = useSettingsStore((state) => state.updateProfileSettings);
   const { isFilterActive, filteredMonitorIds, isFilterReady } = useGroupFilter();
-  // update() writes the active group's montage bucket against currentProfileId,
-  // so every montage-layout write below goes through one path in both modes.
   const { groupKey, bucket, update: updateGroupLayout } = useMontageGroupState();
 
-  // Keep screen awake when Insomnia is enabled
   useInsomnia({ enabled: settings.insomnia });
 
-  // Detect mobile viewport
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
@@ -110,40 +97,23 @@ export default function Montage() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Hidden tiles, keyed exactly like the tiles themselves (tileIdFor): bare
-  // monitor ids in single mode - so lists stored before All mode existed keep
-  // working - and composite profileId:monitorId ids in the aggregate's own
-  // bucket, where
-  // two servers sharing a raw monitor id would otherwise hide each other's
-  // tile (refs #337).
   const hiddenSet = useMemo(
     () => new Set(bucket.hiddenMonitorIds),
     [bucket.hiddenMonitorIds]
   );
 
-  // Raw per-profile monitor counts, independent of any filter/cap below:
-  // decides whether a profile's error strip shows (a profile filtered/capped
-  // to zero tiles still "has data"), mirroring Monitors.tsx.
   const monitorCountByProfile = useMemo(() => countMonitorsByProfile(scopedMonitors), [scopedMonitors]);
 
-  // "Skip offline monitors" (Settings > Live Streaming). Applied before both
-  // the tiles and the kebab list: a monitor with no picture would only open a
-  // stream that never arrives, and listing one the grid refuses to render
-  // would leave its Show toggle doing nothing (refs #527).
   const keepMonitor = useSkipOfflineMonitors();
   const streamableMonitors = useMemo(
     () => scopedMonitors.filter((s) => keepMonitor(s.item)),
     [scopedMonitors, keepMonitor]
   );
 
-  // The kebab's show-monitors list. Built from the FULL monitor list, never
-  // the group-filtered `monitors` below - see the hook for why.
   const visibilityItems = useMontageVisibilityItems(streamableMonitors, isAllMode);
 
   const monitors = useMemo((): MontageTileItem[] => {
     if (isAllMode) {
-      // Group filter is current-profile-scoped (Monitors.tsx precedent) - All
-      // mode skips it until it is extended across servers.
       return streamableMonitors.map((s) => ({
         Monitor: s.item.Monitor,
         Monitor_Status: s.item.Monitor_Status,
@@ -152,9 +122,6 @@ export default function Montage() {
       }));
     }
     let list: MonitorData[] = streamableMonitors.map((s) => ({ Monitor: s.item.Monitor, Monitor_Status: s.item.Monitor_Status }));
-    // When a group filter is active, show only its monitors. An empty id list
-    // means the group resolved to nothing (or groups have not loaded yet), so
-    // render none rather than falling back to streaming every monitor.
     if (isFilterActive) {
       list = filteredMonitorIds.length > 0
         ? filterMonitorsByGroup(list, filteredMonitorIds)
@@ -163,59 +130,34 @@ export default function Montage() {
     return list;
   }, [isAllMode, streamableMonitors, isFilterActive, filteredMonitorIds]);
 
-  // tileIdFor degrades to the bare monitor id when the tile has no profileId,
-  // which is every tile in single mode - so one expression covers both modes.
   const visibleMonitors = useMemo(
     () => (hiddenSet.size > 0 ? monitors.filter((m) => !hiddenSet.has(tileIdFor(m))) : monitors),
     [monitors, hiddenSet]
   );
 
-  // Edit mode state lifted to page level. Declared here because paging below
-  // turns itself off for it.
+  // Edit mode state lifted to page level.
   const [isEditMode, setIsEditMode] = useState(false);
 
-  // Paging (refs #507): the slice happens BEFORE the stream budget below, not
-  // after. A budget spent on the whole list and then paged would give page 1
-  // the twelve tiles it allowed and page 2 the four that were left; paging
-  // first hands each page its own budget, and in single mode - which has no
-  // budget at all - this is the only bound on how many tiles mount.
-  //
-  // Editing shows the WHOLE montage, never a page. Every layout write - a drag,
-  // a resize, apply-columns, fill-width, loading a saved layout - persists the
-  // layout react-grid-layout reports, and rgl only knows the tiles it was
-  // given. Paged, that array holds one page, so any reshape would write a
-  // `workingLayout` missing every other page and silently discard positions the
-  // user arranged (I2). Showing everything while editing keeps those six paths
-  // seeing the whole list, which is what they have always assumed.
-  //
-  // Which page resets when the scope or the group filter changes, since page 4
-  // of the previous list says nothing about this one.
+  // DRAFT: active template id (null = normal free-form mode).
+  // Local state only for now; will move into settings when the feature lands.
+  const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
+
+  // DRAFT: exact rect of the scroll container, used to position the template grid.
+  // Measured on a timer because the container's position depends on chrome
+  // (toolbar, banners) that can change after mount.
+  const [scrollRect, setScrollRect] = useState({ top: 0, left: 0, width: 0, height: 0 });
+
+  
   const paging = useMonitorPaging({
     items: visibleMonitors,
     pageSize: isEditMode ? MONITOR_PAGING.off : settings.monitorsPerPage,
     resetKey: `${currentProfileId ?? ''}:${groupKey}`,
   });
 
-  // Stream cap (refs #337, Phase 4 Task 1): All mode only - single mode stays
-  // unlimited (byte-identical). Without it, N profiles each contributing every
-  // enabled monitor could open dozens of simultaneous streams across
-  // independent servers at once.
-  //
-  // The limit comes from the active aggregate's bucket (its performance
-  // section in Settings),
-  // which `settings` already is while aggregating; it is only read inside the
-  // isAllMode branch, so a single profile's own copy of the key never applies
-  // to anything. mergeProfileSettings has already clamped it.
-  //
-  // allocateStreamBudget shares those slots across the servers in scope
-  // instead of handing the first N to whichever server sorts first; the total
-  // is the same, so the overflow count still describes the dropped tiles.
   const maxStreams = settings.allModeMaxStreams;
   const overflowCount = isAllMode && paging.items.length > maxStreams
     ? paging.items.length - maxStreams
     : 0;
-  // Memoized so the query-input memos below keep their identity across a
-  // render that changed nothing about which tiles are on screen.
   const cappedMonitors = useMemo(
     () =>
       overflowCount > 0
@@ -224,33 +166,18 @@ export default function Montage() {
     [overflowCount, paging.items, maxStreams]
   );
 
-  // Reduced stream tuning (refs #337): another ALL-bucket knob, so it is read
-  // inside the isAllMode branch for the same reason the cap is - a single
-  // profile carries the same key and must never be throttled by it.
   const reduceStream = isAllMode && settings.allModeStreamTuning === 'reduced';
 
-  // Pause while hidden (refs #337): one page-level visibility watch, not one
-  // per tile. Leaving All mode or turning the knob off resumes, so tiles
-  // cannot be stranded paused.
   const paused = useHiddenPause(
     isAllMode && settings.allModePauseHidden,
     MONTAGE_GRID.pauseHiddenGraceMs
   );
 
-  // Idle downgrade (refs #337): after allModeIdleMinutes with no pointer, key
-  // or touch activity, tiles fall back to periodic snapshots on the existing
-  // Streaming Mode path - the same one the user's own setting drives - and any
-  // activity puts them back. One page-level listener covers every tile.
-  //
-  // Independent of insomnia by design: a montage left running on a display
-  // insomnia is keeping awake is exactly what this is for.
   const isIdle = useIdleAfter(
     isAllMode ? settings.allModeIdleMinutes : 0,
     MONTAGE_GRID.idleActivityThrottleMs
   );
 
-  // useMonitorNewEvents stays current-profile-scoped for single mode; All mode
-  // fans the equivalent query out per owning profile (Monitors.tsx precedent).
   const monitorIds = useMemo(
     () => (isAllMode ? [] : cappedMonitors.map(({ Monitor }) => Monitor.Id)),
     [isAllMode, cappedMonitors]
@@ -269,30 +196,20 @@ export default function Montage() {
   const { counts: scopedNewEventCounts, newest: scopedNewestEventAt } =
     useScopedMonitorNewEvents(scopedMonitorRefs);
 
-  // Edit mode shows the pad whatever the setting says: a drag there reorders
-  // tiles rather than scrolling, which is a fact about the mode rather than a
-  // preference. The kebab entry writes the remembered setting (refs #365).
   const [showScrollPad, toggleScrollPad] = useScrollPad(isEditMode);
 
-  // Active saved layout name (persisted in settings)
   const activeLayoutName = bucket.activeLayoutName;
 
-  // Monitor label overlay toggle for fullscreen mode
   const [showMonitorLabels, setShowMonitorLabels] = useState(false);
 
-  // Toolbar visibility (controlled from app header eye button)
   const showToolbar = settings.montageShowToolbar;
 
-  // Fullscreen mode. currentProfileId (not currentProfile.id): the real
-  // profile id in single mode, the active aggregate's id otherwise, where
-  // currentProfile itself is null (refs #337).
   const { isFullscreen, handleToggleFullscreen } =
     useFullscreenMode({
       profileId: currentProfileId,
       settings,
       settingKey: 'montageIsFullscreen',
     });
-
 
   // Grid layout management
   const {
@@ -314,20 +231,14 @@ export default function Montage() {
     settings,
     isEditMode,
     groupKey,
-    // In fullscreen the tile header is an absolute overlay and takes no flow
-    // space; in normal mode it is in flow at the height the display mode
-    // actually renders (refs #359).
     tileHeaderPx: isFullscreen
       ? 0
       : settings.displayMode === 'compact'
         ? MONTAGE_GRID.cardHeaderHeightCompactPx
         : MONTAGE_GRID.cardHeaderHeightPx,
+    activeTemplate,
   });
 
-  // Tile render resolvers passed to MontageGridSections: the owning profile
-  // and event-badge counts differ by mode (All mode reads its own server /
-  // scoped counts, single mode reads currentProfile / the page's own
-  // counts), so the extracted component stays agnostic of that branching.
   const resolveOwnerProfile = useCallback(
     (profileId: ProfileId | undefined): Profile | null =>
       profileId ? profilesById.get(profileId) ?? null : currentProfile,
@@ -348,51 +259,58 @@ export default function Montage() {
     [scopedNewestEventAt, newestEventAt]
   );
 
-  // Container resize observation
   const { containerRef } = useContainerResize({
     onWidthChange: handleWidthChange,
     currentWidthRef,
   });
 
-  // The same element also scrolls, and the scroll pad needs to reach it.
-  // Composed in a stable callback so the resize observer is not torn down and
-  // re-attached on every render.
-  //
-  // Also kept in state, not only in the ref: the viewport gating below roots
-  // its observer on this element and has to build one the moment it exists,
-  // which a ref alone cannot announce.
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [scrollContainer, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+
   const setScrollContainer = useCallback(
     (element: HTMLDivElement | null) => {
-      scrollContainerRef.current = element;
       setScrollContainerEl(element);
       containerRef(element);
     },
     [containerRef]
   );
 
-  // Viewport gating (refs #337): All mode only. A tile scrolled out of the
-  // container (plus a container's worth of margin) holds no connection at
-  // all, and comes back as it returns.
-  //
-  // This runs AFTER the stream budget above, and the ordering is the point:
-  // the budget decides which tiles exist, gating decides which of those hold
-  // a connection. A tile the budget dropped never reaches here, and a tile
-  // gated here still counts against the budget - so scrolling cannot promote
-  // an overflow monitor into the grid.
-  const { isTileGated, registerTile } = useViewportGating({
+  // Mirror the container into the ref outside any effect that reads it,
+  // so the ScrollPad gets a stable handle without tripping the
+  // react-hooks immutability rule.
+  useEffect(() => {
+    scrollContainerRef.current = scrollContainer;
+  }, [scrollContainer]);
+  
+    // DRAFT: measure the scroll container on a timer so the template grid's
+  // fixed position tracks chrome changes (toolbar height, banners) that can
+  // happen after mount.
+  useEffect(() => {
+    if (!scrollContainer) return;
+    const update = () => {
+      const r = scrollContainer.getBoundingClientRect();
+      setScrollRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+    };
+    update();
+    window.addEventListener('resize', update);
+    const interval = window.setInterval(update, 500);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.clearInterval(interval);
+    };
+  }, [scrollContainer]);
+  
+  
+    const { isTileGated, registerTile } = useViewportGating({
     enabled: isAllMode && settings.allModeViewportGating,
     root: scrollContainer,
     rootMargin: MONTAGE_GRID.viewportGatingRootMargin,
     lingerMs: MONTAGE_GRID.viewportGatingLingerMs,
   });
 
-  // TV mode D-pad grid navigation
   const { isTvMode } = useTvMode();
   const [focusedMonitorIndex, setFocusedMonitorIndex] = useState(0);
 
-  // Estimate columns from gridCols (display columns)
   const estimatedCols = gridCols;
 
   const handleDpadNav = useCallback(
@@ -439,7 +357,6 @@ export default function Montage() {
     Enter: handleDpadEnter,
   });
 
-  // Focus the monitor element when index changes in TV mode
   useEffect(() => {
     if (!isTvMode || cappedMonitors.length === 0) return;
     const focused = cappedMonitors[focusedMonitorIndex];
@@ -450,7 +367,6 @@ export default function Montage() {
     el?.focus();
   }, [isTvMode, focusedMonitorIndex, cappedMonitors]);
 
-  // Pinch-to-zoom (disabled in fullscreen to avoid gesture conflicts)
   const pinchZoom = usePinchZoom({
     minScale: 0.5,
     maxScale: 3,
@@ -470,7 +386,6 @@ export default function Montage() {
     });
   };
 
-  // Saved layout handlers
   const handleSaveLayout = (name: string) => {
     const entry = { name, layout: [...layout], displayCols: gridCols };
     updateGroupLayout({
@@ -490,10 +405,6 @@ export default function Montage() {
     updateGroupLayout({ savedLayouts: saved });
   };
 
-  // Hiding a tile needs no per-server persistence: the ids are composite
-  // while aggregating, so the whole list lives in the active aggregate's own
-  // bucket, and bare ids keep going to the real profile in single mode
-  // (refs #337).
   const handleToggleMonitorVisibility = useCallback(
     (id: string) => {
       const current = bucket.hiddenMonitorIds;
@@ -509,13 +420,6 @@ export default function Montage() {
     setIsEditMode((prev) => !prev);
   };
 
-  // Loading state. Also wait until the group filter has resolved (isFilterReady)
-  // so we never mount monitor tiles against an unresolved group membership.
-  // Mounting a tile starts its stream, so rendering all monitors for even one
-  // frame before the group narrows would open every stream. isLoading never
-  // clears on its own once any profile has errored (see useScopedMonitors),
-  // so a profile that errored still falls through to the states below instead
-  // of spinning forever (refs #337, Monitors.tsx Task 4 finding).
   const stillWaiting = scopedLoading && profileErrors.length === 0;
   if (stillWaiting || (!isAllMode && !isFilterReady)) {
     return (
@@ -530,12 +434,6 @@ export default function Montage() {
     );
   }
 
-  // Single mode only: byte-identical to the pre-existing cold-start error
-  // wall. scopedLoading only stays true until the (one, in single mode)
-  // profile's monitors query has ever produced data - the same condition the
-  // old `!data` check captured. All mode gets per-profile strips below
-  // instead, added underneath the grid rather than replacing it, since one
-  // failed server should not hide every other server's healthy tiles.
   if (!isAllMode && profileErrors.length > 0 && scopedLoading) {
     return (
       <div className="p-8">
@@ -547,12 +445,7 @@ export default function Montage() {
     );
   }
 
-  // Empty state, keyed off the PRE-hide list. Keying it off the visible tiles
-  // made hiding every monitor a one-way door: this branch renders no toolbar,
-  // so the kebab that would un-hide them was gone and nothing else in the app
-  // edits that list. With monitors present but all hidden the page renders
-  // normally and says so under the toolbar instead (refs #337).
-  if (monitors.length === 0) {
+  if (monitors.length === 0 && !activeTemplate) {
     return (
       <div className="p-8">
         <div className="flex items-center justify-between mb-6">
@@ -564,21 +457,10 @@ export default function Montage() {
     );
   }
 
-  // Per-profile errors, All mode only (single mode keeps the byte-identical
-  // cold-start wall above and otherwise stays silent, same as before this
-  // task - refs #337, Phase 4 Task 1). One strip per profile whose query
-  // failed AND produced zero monitors; a profile with cached data and a
-  // background refetch error renders that data with no strip, same
-  // zero-data-suppression semantics as Monitors.tsx.
   const visibleErrors = isAllMode
     ? profileErrors.filter((err) => (monitorCountByProfile.get(err.profileId) ?? 0) === 0)
     : [];
 
-  // Section cappedMonitors by owning server when the toggle is on. All mode
-  // only - single mode never has more than one profile to group by. The
-  // actual grid/tile rendering lives in MontageGridSections (extracted,
-  // refs #337 Phase 4 Task 1 fix round 1); this stays here since it depends
-  // on isAllMode/settings the same way visibleErrors above does.
   const groupedSections: MontageGroupedSections | null = isAllMode && settings.monitorsGroupByServer
     ? groupByOwningProfile(cappedMonitors)
     : null;
@@ -588,13 +470,12 @@ export default function Montage() {
       className={cn(
         isFullscreen
           ? 'fixed inset-0 z-40 bg-black flex flex-col'
-          : 'flex flex-col bg-background relative'
+	  : 'flex flex-col bg-background relative h-[calc(100dvh-var(--sai-top,0px))] overflow-hidden'
       )}
     >
-      {/* Header - Hidden in fullscreen mode */}
+
       {!isFullscreen && (
         <>
-          {/* Toolbar row - toggleable via eye button in app header */}
           {showToolbar && (
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap p-2 sm:p-3 border-b bg-card/50 backdrop-blur-sm shrink-0 z-10">
               {isAllMode ? (
@@ -607,10 +488,6 @@ export default function Montage() {
                   aria-label={t('monitors.group_by_server')}
                   onClick={() => {
                     if (!currentProfileId) return;
-                    // Aggregate-bucket setting (currentProfile is null while
-                    // aggregating) -
-                    // reuses Monitors.tsx's server-grouping toggle rather than
-                    // a new montage-only field (refs #337, Phase 4 Task 1).
                     updateSettings(currentProfileId, {
                       monitorsGroupByServer: !settings.monitorsGroupByServer,
                     });
@@ -632,6 +509,22 @@ export default function Montage() {
                 onLoadLayout={handleLoadLayout}
                 onDeleteLayout={handleDeleteLayout}
               />
+              {/* DRAFT: template toggle. One template, on/off. */}
+              <Button
+                variant={activeTemplate ? 'default' : 'outline'}
+                size="sm"
+                className="h-8 sm:h-9"
+                aria-pressed={!!activeTemplate}
+                title={t('montage.template')}
+                aria-label={t('montage.template')}
+                onClick={() => setActiveTemplate(prev => prev ? null : 'tl-1-3-4')}
+                data-testid="montage-template-toggle"
+              >
+                <LayoutTemplate className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">
+                  {t('montage.template')}
+                </span>
+              </Button>
               <Button
                 onClick={handleEditModeToggle}
                 variant={isEditMode ? 'default' : 'outline'}
@@ -671,8 +564,6 @@ export default function Montage() {
                 <Maximize className="h-4 w-4" />
               </Button>
               <NinjiiToolbarButton />
-              {/* Only once there is a second page, so a montage that fits looks
-                  exactly as it did before paging existed (refs #507). */}
               {paging.isPaged && (
                 <MonitorPageControls
                   page={paging.page}
@@ -697,7 +588,6 @@ export default function Montage() {
         </>
       )}
 
-      {/* Fullscreen toolbar: always visible, thin, translucent */}
       {isFullscreen && (
         <FullscreenControls
           onExitFullscreen={() => handleToggleFullscreen(false)}
@@ -706,32 +596,30 @@ export default function Montage() {
         />
       )}
 
-      {/* Per-profile errors: All mode only, see visibleErrors above. */}
       {!isFullscreen && <MontageErrorStrips errors={visibleErrors} onRetry={refetchProfile} />}
 
-      {/* Grid Content */}
       <div
         ref={setScrollContainer}
         {...pinchZoom.bind()}
         className={cn(
-          'flex-1 overflow-auto bg-muted/10',
+          'flex-1 relative bg-muted/10 min-h-0',
+          activeTemplate ? 'overflow-hidden' : 'overflow-auto',
           isFullscreen
             ? 'pt-[calc(var(--fullscreen-toolbar-h)+var(--sai-top,env(safe-area-inset-top)))] overscroll-contain'
             : 'touch-pan-y'
         )}
       >
+
         <div
-          style={{
+          className={activeTemplate ? 'absolute inset-0' : undefined}
+          style={activeTemplate ? undefined : {
             transform: `scale(${pinchZoom.scale})`,
             transformOrigin: 'top left',
             transition: pinchZoom.isPinching ? 'none' : 'transform 0.2s ease-out',
           }}
         >
-          {/* Not in fullscreen: the notice tells the user to reach for the
-              kebab's show-monitors list, and fullscreen's own thin toolbar
-              carries no kebab. Pointing at a control that is not on screen is
-              worse than an empty grid the user put there deliberately. */}
-          {cappedMonitors.length === 0 && !isFullscreen && (
+                
+          {cappedMonitors.length === 0 && !isFullscreen && !activeTemplate && (
             <div data-testid="montage-all-hidden">
               <EmptyState
                 icon={Video}
@@ -743,6 +631,8 @@ export default function Montage() {
             cappedMonitors={cappedMonitors}
             groupedSections={groupedSections}
             scopeId={currentProfileId}
+            activeTemplate={activeTemplate}
+            scrollRect={scrollRect}
             layout={layout}
             gridCols={gridCols}
             isEditMode={isEditMode}

@@ -950,7 +950,9 @@
     "menu_refresh": "Actualizar",
     "menu_show_monitors": "Monitores",
     "tile_error": "Error de mosaico",
-    "alarm_status": "Alarma en {{monitor}}"
+    "alarm_status": "Alarma en {{monitor}}",
+    "template": "Templates",
+    "template_pick_camera": "Right-click to choose a camera"
   },
   "notification_history": {
     "title": "Notificaciones",

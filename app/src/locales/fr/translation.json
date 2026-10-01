@@ -950,7 +950,9 @@
     "menu_refresh": "Actualiser",
     "menu_show_monitors": "Moniteurs",
     "tile_error": "Erreur de tuile",
-    "alarm_status": "Alarme sur {{monitor}}"
+    "alarm_status": "Alarme sur {{monitor}}",
+    "template": "Templates",
+    "template_pick_camera": "Right-click to choose a camera"
   },
   "notification_history": {
     "title": "Notifications",
