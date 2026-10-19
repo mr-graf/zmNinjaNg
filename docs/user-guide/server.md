@@ -4,17 +4,36 @@ The Server page shows the health and configuration of your ZoneMinder server, or
 
 ## Version information
 
+```{figure} ../_static/img/screens/server/page.jpg
+:align: right
+:width: 240px
+:alt: The Server page on a phone, showing version information, load, CPU, storage and swap cards
+
+The Server page
+```
+
 - **ZoneMinder version**: the server's ZM release.
 - **API version**: the version of the ZoneMinder API the app is talking to.
 - **Timezone**: the server's configured timezone, used to align event times correctly.
 
-## Load average
+## Server stats
 
-The server's CPU load average. Sustained high load can cause dropped frames or slow event recording.
+```{figure} ../_static/img/screens/server/stats.jpg
+:align: center
+:width: 360px
+:alt: Load average, CPU load, storage, swap and server status cards
 
-## Disk usage
+The stats cards on the Server page
+```
 
-Space used, in GB, on the disk that holds ZoneMinder's events directory (the `ZM_DIR_EVENTS` setting). If your storage areas are on other disks, this card measures a different disk from them. Use the storage areas below for those.
+The cards under the version information show the same figures as the stats bar at the top of ZoneMinder's web console, calculated the same way. The console describes the server it runs on. The app uses the server in the Servers list whose hostname matches the profile's API URL, or the single server when the install has only one.
+
+- **Load average**: the server's CPU load average. Sustained high load can cause dropped frames or slow event recording.
+- **CPU load**: the share of CPU time in use.
+- **Storage**: one line per enabled storage area, with the percentage of its disk in use, used and total space, and the space its events take. The line turns orange above 95% and red above 98%.
+- **Swap**: the percentage of swap in use, with used and total space. It turns orange above 90% and red above 95%. The card is hidden when the server has no swap.
+
+ZoneMinder's `zmstats` process records the load, CPU and swap figures about once a minute. When that server has no recent record, or no server's hostname matches the profile, the page shows the live load average of the server answering the API and hides CPU load and swap. An account without System view permission sees no load average, as in the console. The console's memory and database connection figures are not available through the API, so the page leaves them out.
 
 ## Status
 
@@ -22,21 +41,40 @@ Shows whether the ZoneMinder capture daemon is running or stopped, along with th
 
 ## Servers / Details
 
-In a single-server setup this card shows the server's details. In a multi-server cluster it lists every server with per-server metrics:
+In a single-server setup this card shows the server's details. In a multi-server cluster it lists every server with the same per-server figures as Options then Servers in ZoneMinder's console:
 
-- **CPU load**
-- **Total memory** and **Free memory**
+- **CPU load**: the load average, in red above 5.
+- **Free/total memory**: free memory, then total. Red when less than a tenth is free.
+- **Free/total swap**: free swap, then total. Red when less than a tenth is free.
+
+ZoneMinder updates these figures only while the server's `zmstats` runs, so a server marked NotRunning may show old values.
 
 ## Storage areas
 
-Each enabled storage area is listed with:
+```{figure} ../_static/img/screens/server/storage.jpg
+:align: center
+:width: 344px
+:alt: One storage area listing its name, path, disk usage and event count
+
+A storage area entry
+```
+
+Each enabled storage area is listed the way ZoneMinder's Options then Storage table shows it:
 
 - Its name and filesystem path
-- The space its events take, in GB. ZoneMinder keeps this as a running total rather than measuring it each time, so it can drift. If the total drops below zero, the page says the reported value has drifted instead of showing it. Running `zmaudit.pl`, or turning on `ZM_RUN_AUDIT` in ZoneMinder's options, resets it to the real sum.
-- Free and total space in GB, with a usage bar. Free space matches the Avail column of `df`. The bar counts space the filesystem reserves for root (5% on ext4 by default) as used, so a disk that holds few events can still show a few percent full.
+- Disk usage as a percentage, then used and total space, for example `70% 69.38 GB of 97.87 GB`. Used space counts what the filesystem reserves for root (5% on ext4 by default), so a disk that holds few events can still show a few percent used. The percentage is rounded down, as in that table, so it can read one lower than the console's header bar, which rounds to the nearest.
+- The number of events stored there and the space ZoneMinder says they take, for example `132 using 1.45 GB`. ZoneMinder keeps that space as a running total rather than measuring it each time, so it can drift, even below zero. The page shows a negative total too, in MB or GB where ZoneMinder prints the raw byte count. Running `zmaudit.pl`, or turning on `ZM_RUN_AUDIT` in ZoneMinder's options, resets it to the real sum.
 - The server it belongs to (in multi-server setups)
 
 ## Account permissions
+
+```{figure} ../_static/img/screens/server/permissions.jpg
+:align: center
+:width: 360px
+:alt: Account permissions card listing System, Monitors, Stream, Events, Control and Groups levels
+
+The Account permissions card
+```
 
 Lists what the ZoneMinder account this profile signs in as is allowed to do: its System, Monitors, Stream, Events, Control and Groups levels. These come from the account's own ZoneMinder user record, and only an administrator can change them, in Options then Users in the ZoneMinder web console.
 
@@ -45,6 +83,14 @@ Where a level reads "Not determined", the app could not read it. ZoneMinder only
 These levels explain what the rest of the app does or does not offer you. See [What your account can do](#what-your-account-can-do) below.
 
 ## ZoneMinder control
+
+```{figure} ../_static/img/screens/server/zm-control.jpg
+:align: center
+:width: 360px
+:alt: ZoneMinder Control card with the current state, a state picker and an Apply button
+
+The ZoneMinder Control card
+```
 
 Shows the current ZoneMinder run state and lets you apply a different one. Changing the run state takes effect on the server, so you can switch between configured states (for example a "Home" or "Away" state) without opening the ZoneMinder web console.
 

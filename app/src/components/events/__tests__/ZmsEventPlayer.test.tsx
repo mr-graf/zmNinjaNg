@@ -56,7 +56,7 @@ vi.mock('../../../api/events', () => ({
 }));
 
 function renderPlayer(
-  props: { suspended?: boolean; showNotice?: boolean; profileId?: ProfileId; fullscreen?: boolean } = {}
+  props: { suspended?: boolean; showNotice?: boolean; profileId?: ProfileId; fullscreen?: boolean; caption?: React.ReactNode } = {}
 ) {
   return render(
     <ZmsEventPlayer
@@ -160,6 +160,31 @@ describe('ZmsEventPlayer', () => {
     expect(screen.queryByTestId('zms-speed-100')).toBeNull();
   });
 
+  it('puts the caption between the picture and the transport controls, and drops it in fullscreen', () => {
+    renderPlayer({ caption: <p data-testid="zms-caption">Oct 18, 6:00 AM</p> });
+    const caption = screen.getByTestId('zms-caption');
+    const follows = Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(screen.getByTestId('zms-video-area').compareDocumentPosition(caption) & follows).toBeTruthy();
+    expect(caption.compareDocumentPosition(screen.getByTestId('zms-play-pause')) & follows).toBeTruthy();
+
+    cleanup();
+    renderPlayer({ caption: <p data-testid="zms-caption">Oct 18, 6:00 AM</p>, fullscreen: true });
+    expect(screen.queryByTestId('zms-caption')).toBeNull();
+  });
+
+  it('collapses the speed and frame-jump card, keeping play controls, and remembers it', () => {
+    localStorage.clear();
+    renderPlayer();
+    fireEvent.click(screen.getByTestId('zms-options-card-toggle'));
+    expect(screen.queryByTestId('zms-speed-100')).toBeNull();
+    expect(screen.getByTestId('zms-play-pause')).toBeTruthy();
+
+    cleanup();
+    renderPlayer();
+    expect(screen.queryByTestId('zms-speed-100')).toBeNull();
+    localStorage.clear();
+  });
+
   it('shows the ZMS notice only when playback fell back from video', () => {
     renderPlayer();
     expect(screen.queryByText('event_detail.zms_playback')).toBeNull();
@@ -169,39 +194,68 @@ describe('ZmsEventPlayer', () => {
     expect(screen.getByText('event_detail.zms_playback')).toBeTruthy();
   });
 
-  // Suspension (#272): the frame viewer covers the stream, so it pauses while
-  // open and resumes on close. CMD_PAUSE is 1 and CMD_PLAY is 2.
-  it('pauses a running stream while suspended and resumes it on release', () => {
+  // Suspension (#272, #547): something covers the stream (the frame viewer,
+  // the Nearby panel). A paused zms keeps its MJPEG response open and holds
+  // one of the browser's connections to the server, so the stream is quit,
+  // not paused, and a running one restarts on a fresh connkey on release.
+  const suspendedPlayer = (suspended: boolean) => (
+    <ZmsEventPlayer portalUrl="https://zm.test" eventId="42" profileId={undefined} token="tok" totalFrames={100}
+      alarmFrames={0} eventLength={10} suspended={suspended} />
+  );
+
+  it('quits a running stream while suspended and restarts it on a fresh connkey on release', () => {
     const { rerender } = renderPlayer();
+    const streamConnkey = connkeyOf(getStreamImg().src);
+    fireEvent.load(getStreamImg());
 
-    rerender(
-      <ZmsEventPlayer portalUrl="https://zm.test" eventId="42" profileId={undefined} token="tok" totalFrames={100}
-        alarmFrames={0} eventLength={10} suspended />
-    );
-    expect(callsForCommand('1')).toHaveLength(1);
+    rerender(suspendedPlayer(true));
+    expect(quitCalls().map((c) => connkeyOf(c[0] as string))).toEqual([streamConnkey]);
+    expect(callsForCommand('1')).toHaveLength(0);
 
-    rerender(
-      <ZmsEventPlayer portalUrl="https://zm.test" eventId="42" profileId={undefined} token="tok" totalFrames={100}
-        alarmFrames={0} eventLength={10} suspended={false} />
-    );
-    expect(callsForCommand('2')).toHaveLength(1);
+    rerender(suspendedPlayer(false));
+    expect(connkeyOf(getStreamImg().src)).not.toBe(streamConnkey);
+    expect(screen.getByTestId('zms-play-pause').getAttribute('title')).toBe('event_detail.pause');
   });
 
-  it('leaves an already paused stream paused after suspension', () => {
+  // Back from a nearby event lands on this event with the panel already open,
+  // so the player mounts suspended. Starting the stream then would hold a
+  // connection behind the panel and leak it when release restarts the stream.
+  it('starts no stream while mounted suspended, and one on release', () => {
+    const { rerender } = render(suspendedPlayer(true));
+    expect(screen.queryByAltText('event_detail.event_playback')).toBeNull();
+
+    rerender(suspendedPlayer(false));
+    expect(connkeyOf(getStreamImg().src)).toBeTruthy();
+    expect(screen.getByTestId('zms-play-pause').getAttribute('title')).toBe('event_detail.pause');
+    expect(quitCalls()).toHaveLength(0);
+  });
+
+  it('does not quit the suspended stream a second time on unmount', () => {
+    vi.useFakeTimers();
+    const { rerender, unmount } = renderPlayer();
+    fireEvent.load(getStreamImg());
+    rerender(suspendedPlayer(true));
+
+    unmount();
+    vi.advanceTimersByTime(ZM_INTEGRATION.cmdQuitGraceMs * 2);
+
+    expect(quitCalls()).toHaveLength(1);
+  });
+
+  it('leaves an already paused stream stopped after suspension, and play starts a new one', () => {
     const { rerender } = renderPlayer();
+    const streamConnkey = connkeyOf(getStreamImg().src);
+    fireEvent.load(getStreamImg());
     fireEvent.click(screen.getByTitle('event_detail.pause'));
-    expect(callsForCommand('1')).toHaveLength(1);
 
-    rerender(
-      <ZmsEventPlayer portalUrl="https://zm.test" eventId="42" profileId={undefined} token="tok" totalFrames={100}
-        alarmFrames={0} eventLength={10} suspended />
-    );
-    rerender(
-      <ZmsEventPlayer portalUrl="https://zm.test" eventId="42" profileId={undefined} token="tok" totalFrames={100}
-        alarmFrames={0} eventLength={10} suspended={false} />
-    );
+    rerender(suspendedPlayer(true));
+    rerender(suspendedPlayer(false));
+    expect(quitCalls()).toHaveLength(1);
+    expect(connkeyOf(getStreamImg().src)).toBe(streamConnkey);
+    expect(screen.getByTestId('zms-play-pause').getAttribute('title')).toBe('event_detail.play');
 
-    expect(callsForCommand('1')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('zms-play-pause'));
+    expect(connkeyOf(getStreamImg().src)).not.toBe(streamConnkey);
     expect(callsForCommand('2')).toHaveLength(0);
   });
 
@@ -215,7 +269,8 @@ describe('ZmsEventPlayer', () => {
 
     expect(screen.queryByTestId('zms-jump-to-alarm-frame')).toBeNull();
     expect(screen.getByTestId('zms-quick-jump-alarm-frame')).toBeTruthy();
-    expect(screen.getByTestId('zms-jump-to-max-score-frame')).toBeTruthy();
+    // The max-score thumbnail folds away with the rest of Playback options.
+    expect(screen.getByTestId('zms-options-card')).toContainElement(screen.getByTestId('zms-jump-to-max-score-frame'));
   });
 
   it('drops the max-score card when it is the same frame as the alarm', () => {

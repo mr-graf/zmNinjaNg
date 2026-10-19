@@ -31,10 +31,21 @@ import {
   RotateCw,
   Database,
   MemoryStick,
+  TrendingUp,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getServers, getLoad, getDiskPercent, getDaemonCheck, getStorages } from '../api/server';
+import { getServers, getLoad, getLatestServerStat, getDaemonCheck, getStorages, getStorageEventCount } from '../api/server';
+import { formatForServerInTz, resolveProfileTimezone } from '../lib/time';
+import { SERVER_STATS_WINDOW_MINUTES } from '../lib/zmninja-ng-constants';
+import {
+  ZM_STORAGE_USAGE_DANGER_PERCENT,
+  ZM_STORAGE_USAGE_WARN_PERCENT,
+  ZM_SWAP_USAGE_DANGER_PERCENT,
+  ZM_SWAP_USAGE_WARN_PERCENT,
+  ZM_SERVER_LOAD_DANGER,
+} from '../lib/zm/zm-constants';
+import { zmHumanFilesize, zmLowFree, zmThisServerId, zmUsageLevel } from '../lib/zm/server-stats';
 import { getServerTimeZone } from '../api/time';
 import { getStates, changeState } from '../api/states';
 import { usePermissions } from '../hooks/usePermissions';
@@ -90,18 +101,31 @@ export default function Server() {
     refetchInterval: bandwidth.daemonCheckInterval,
   });
 
-  // Fetch load average
-  const { data: loadData, isLoading: loadLoading } = useQuery({
-    queryKey: queryKeys.serverLoad(currentProfile?.id),
-    queryFn: () => getLoad(getSession(currentProfile!.id).client),
-    enabled: !!currentProfile && isAuthenticated,
+  // The newest Server_Stats row of the server the console's navbar would
+  // describe: where it reads Load, Cpu and Swap, so these match the portal.
+  const thisServerId = currentProfile && !serversLoading
+    ? zmThisServerId(servers ?? [], currentProfile.apiUrl)
+    : undefined;
+  const { data: serverStat, isLoading: statLoading } = useQuery({
+    queryKey: queryKeys.serverStats(currentProfile?.id, thisServerId),
+    queryFn: () => getLatestServerStat(
+      getSession(currentProfile!.id).client,
+      formatForServerInTz(
+        new Date(Date.now() - SERVER_STATS_WINDOW_MINUTES * 60_000),
+        resolveProfileTimezone(currentProfile!.timezone),
+      ),
+      thisServerId!,
+    ),
+    enabled: !!currentProfile && isAuthenticated && thisServerId !== undefined,
   });
 
-  // Fetch disk usage
-  const { data: diskData, isLoading: diskLoading } = useQuery({
-    queryKey: queryKeys.diskUsage(currentProfile?.id),
-    queryFn: () => getDiskPercent(getSession(currentProfile!.id).client),
-    enabled: !!currentProfile && isAuthenticated,
+  // Live load average, only when the server has no recent stats row (zmstats
+  // not running, or a ZoneMinder older than the stats filter).
+  const { data: loadData, isLoading: loadLoading, error: loadError } = useQuery({
+    queryKey: queryKeys.serverLoad(currentProfile?.id),
+    queryFn: () => getLoad(getSession(currentProfile!.id).client),
+    enabled: !!currentProfile && isAuthenticated && thisServerId !== undefined && !statLoading
+      && serverStat?.CpuLoad === undefined,
   });
 
   // Fetch states
@@ -123,6 +147,17 @@ export default function Server() {
     queryKey: queryKeys.storages(currentProfile?.id),
     queryFn: () => getStorages(getSession(currentProfile!.id).client),
     enabled: !!currentProfile && isAuthenticated,
+  });
+
+  const enabledStorageIds = storages?.filter((s) => s.Enabled).map((s) => s.Id);
+  const { data: storageEventCounts } = useQuery({
+    queryKey: queryKeys.storageEventCounts(currentProfile?.id),
+    queryFn: async () => {
+      const client = getSession(currentProfile!.id).client;
+      const counts = await Promise.all(enabledStorageIds!.map((id) => getStorageEventCount(client, id)));
+      return Object.fromEntries(enabledStorageIds!.map((id, i) => [id, counts[i]]));
+    },
+    enabled: !!currentProfile && isAuthenticated && !!enabledStorageIds?.length,
   });
 
   // Mutation for state change
@@ -180,14 +215,19 @@ export default function Server() {
     className: 'flex items-center gap-2',
   });
 
-  const formatMemory = (bytes: number | undefined) => {
-    if (!bytes) return t('common.unknown');
-    const gb = bytes / (1024 * 1024 * 1024);
-    return `${gb.toFixed(2)} GB`;
-  };
-
   const isMultiServer = servers && servers.length > 1;
-  const diskUsageGB = diskData?.usage;
+  const liveLoad = Array.isArray(loadData?.load) ? loadData.load[0] : loadData?.load;
+  const load = serverStat?.CpuLoad ?? liveLoad;
+  // getLoad needs System view, as the navbar's Load does; a refusal hides it.
+  const loadRefused = isPermissionDenied(loadError);
+  const swapTotal = serverStat?.TotalSwap;
+  const swapUsed = swapTotal && serverStat?.FreeSwap !== undefined ? swapTotal - serverStat.FreeSwap : undefined;
+  // The console truncates the swap percentage and rounds the storage one.
+  const swapPercent = swapTotal && swapUsed !== undefined ? Math.trunc((100 * swapUsed) / swapTotal) : undefined;
+  const swapLevel = swapPercent !== undefined
+    ? zmUsageLevel(swapPercent, ZM_SWAP_USAGE_WARN_PERCENT, ZM_SWAP_USAGE_DANGER_PERCENT)
+    : undefined;
+  const levelClass = { danger: 'text-destructive', warning: 'text-orange-600 dark:text-orange-400' };
 
   return (
     <PageContainer spacing="none" className="space-y-4 sm:space-y-6">
@@ -250,53 +290,112 @@ export default function Server() {
         </CardContent>
       </Card>
 
-      {/* Server Metrics: single-server mode */}
-      {!isMultiServer && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Load Average */}
+      {/* Server Metrics: the same figures, rules and warning colours as
+          ZoneMinder's console navbar, for the server answering the API. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Load Average */}
+        {!loadRefused && (
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-primary" />
+                  <TrendingUp className="h-4 w-4 text-primary" />
                   <CardTitle className="text-base">{t('server.load_average')}</CardTitle>
                 </div>
-                {loadLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                {(statLoading || loadLoading) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {loadData?.load !== undefined
-                  ? (Array.isArray(loadData.load)
-                      ? loadData.load[0]
-                      : loadData.load
-                    ).toFixed(2)
-                  : '--'}
+              <div className="text-2xl font-bold" data-testid="stat-load">
+                {load !== undefined ? load.toFixed(2) : '--'}
               </div>
               <p className="text-xs text-muted-foreground mt-1">{t('server.load_desc')}</p>
             </CardContent>
           </Card>
+        )}
 
-          {/* Disk Usage */}
+        {/* CPU */}
+        {serverStat?.CpuUsagePercent !== undefined && (
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <HardDrive className="h-4 w-4 text-primary" />
-                  <CardTitle className="text-base">{t('server.disk_usage')}</CardTitle>
-                </div>
-                {diskLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              <div className="flex items-center gap-2">
+                <Cpu className="h-4 w-4 text-primary" />
+                <CardTitle className="text-base">{t('server.cpu_load')}</CardTitle>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {diskUsageGB !== undefined ? `${diskUsageGB.toFixed(1)} GB` : '--'}
+              <div className="text-2xl font-bold" data-testid="stat-cpu">
+                {serverStat.CpuUsagePercent.toFixed(1)}%
               </div>
-              <p className="text-xs text-muted-foreground mt-1">{t('server.disk_desc')}</p>
             </CardContent>
           </Card>
+        )}
 
-          {/* Server Status */}
+        {/* Storage: one line per enabled area */}
+        {storages && storages.some((s) => s.Enabled) && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <HardDrive className="h-4 w-4 text-primary" />
+                <CardTitle className="text-base">{t('server.storage_title')}</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {storages.filter((s) => s.Enabled).map((storage) => {
+                const total = storage.DiskTotalSpace;
+                const used = storage.DiskUsedSpace;
+                const percent = total && used != null ? Math.round((used / total) * 100) : undefined;
+                const level = percent !== undefined
+                  ? zmUsageLevel(percent, ZM_STORAGE_USAGE_WARN_PERCENT, ZM_STORAGE_USAGE_DANGER_PERCENT)
+                  : undefined;
+                return (
+                  <div key={storage.Id} className="min-w-0">
+                    <div
+                      className={`text-sm font-semibold truncate ${level ? levelClass[level] : ''}`}
+                      title={storage.Name}
+                      data-testid={`stat-storage-${storage.Id}`}
+                    >
+                      {storage.Name}: {percent !== undefined ? `${percent}%` : '--'}
+                    </div>
+                    {total && used != null && (
+                      <div className="text-xs text-muted-foreground" data-testid={`stat-storage-detail-${storage.Id}`}>
+                        {t('server.used_of_total', { used: zmHumanFilesize(used), total: zmHumanFilesize(total) })}
+                      </div>
+                    )}
+                    {storage.DiskSpace != null && storage.DiskSpace !== used && (
+                      <div className="text-xs text-muted-foreground" data-testid={`stat-storage-events-${storage.Id}`}>
+                        {t('server.used_by_events', { size: zmHumanFilesize(storage.DiskSpace) })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Swap: hidden when the server has none, as in the console */}
+        {swapPercent !== undefined && swapTotal && swapUsed !== undefined && (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <MemoryStick className="h-4 w-4 text-primary" />
+                  <CardTitle className="text-base">{t('server.swap')}</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${swapLevel ? levelClass[swapLevel] : ''}`} data-testid="stat-swap">
+                  {swapPercent}%
+                </div>
+                <p className="text-xs text-muted-foreground mt-1" data-testid="stat-swap-detail">
+                  {t('server.used_of_total', { used: zmHumanFilesize(swapUsed), total: zmHumanFilesize(swapTotal) })}
+                </p>
+              </CardContent>
+            </Card>
+        )}
+
+        {/* Server Status: multi-server installs list each server below */}
+        {!isMultiServer && (
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -322,8 +421,8 @@ export default function Server() {
               </div>
             </CardContent>
           </Card>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Server Details: all servers */}
       {servers && servers.length > 0 && (
@@ -370,62 +469,48 @@ export default function Server() {
                     </div>
 
                     {/* Metrics grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      {/* CPU */}
-                      {srv.CpuUsagePercent !== undefined && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {/* Load average, red above 5 as in Options > Servers */}
+                      {srv.CpuLoad !== undefined && (
                         <div className="space-y-1">
                           <div className="flex items-center gap-1 text-xs text-muted-foreground">
                             <Cpu className="h-3 w-3" />
                             <span>{t('server.cpu_load')}</span>
                           </div>
-                          <div className="text-sm font-semibold">
-                            {srv.CpuUsagePercent.toFixed(1)}%
-                          </div>
-                        </div>
-                      )}
-                      {srv.CpuUsagePercent === undefined && srv.CpuLoad !== undefined && (
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Cpu className="h-3 w-3" />
-                            <span>{t('server.cpu_load')}</span>
-                          </div>
-                          <div className="text-sm font-semibold">
-                            {(srv.CpuLoad * 100).toFixed(1)}%
+                          <div
+                            className={`text-sm font-semibold ${srv.CpuLoad > ZM_SERVER_LOAD_DANGER ? 'text-destructive' : ''}`}
+                            data-testid={`server-load-${srv.Id}`}
+                          >
+                            {srv.CpuLoad.toFixed(2)}
                           </div>
                         </div>
                       )}
 
-                      {/* Total Memory */}
-                      {srv.TotalMem !== undefined && (
+                      {/* Free / total memory */}
+                      {srv.TotalMem !== undefined && srv.FreeMem !== undefined && (
                         <div className="space-y-1">
                           <div className="flex items-center gap-1 text-xs text-muted-foreground">
                             <MemoryStick className="h-3 w-3" />
-                            <span>{t('server.total_memory')}</span>
+                            <span>{t('server.free_total_memory')}</span>
                           </div>
-                          <div className="text-sm font-semibold">
-                            {formatMemory(srv.TotalMem)}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Free Memory */}
-                      {srv.FreeMem !== undefined && (
-                        <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">
-                            {t('server.free_memory')}
-                          </div>
-                          <div className="text-sm font-semibold">
-                            {formatMemory(srv.FreeMem)}
+                          <div
+                            className={`text-sm font-semibold ${zmLowFree(srv.FreeMem, srv.TotalMem) ? 'text-destructive' : ''}`}
+                            data-testid={`server-memory-${srv.Id}`}
+                          >
+                            {zmHumanFilesize(srv.FreeMem)} / {zmHumanFilesize(srv.TotalMem)}
                           </div>
                         </div>
                       )}
 
-                      {/* Swap */}
+                      {/* Free / total swap */}
                       {srv.TotalSwap !== undefined && srv.FreeSwap !== undefined && (
                         <div className="space-y-1">
-                          <div className="text-xs text-muted-foreground">Swap</div>
-                          <div className="text-sm font-semibold">
-                            {formatMemory(srv.FreeSwap)} / {formatMemory(srv.TotalSwap)}
+                          <div className="text-xs text-muted-foreground">{t('server.free_total_swap')}</div>
+                          <div
+                            className={`text-sm font-semibold ${zmLowFree(srv.FreeSwap, srv.TotalSwap) ? 'text-destructive' : ''}`}
+                            data-testid={`server-swap-${srv.Id}`}
+                          >
+                            {zmHumanFilesize(srv.FreeSwap)} / {zmHumanFilesize(srv.TotalSwap)}
                           </div>
                         </div>
                       )}
@@ -479,20 +564,14 @@ export default function Server() {
             <div className="space-y-3" data-testid="storage-list">
               {storages.filter((s) => s.Enabled).map((storage) => {
                 const serverName = servers?.find((s) => s.Id === storage.ServerId)?.Name;
-                const totalGB = storage.DiskTotalSpace
-                  ? (storage.DiskTotalSpace / (1024 * 1024 * 1024)).toFixed(1)
-                  : null;
-                // Free, not used: ZoneMinder's DiskUsedSpace is total minus
-                // available, so it counts the filesystem's root-reserved blocks
-                // (5% on ext4) as used. Free matches df's Avail (refs #539).
-                const freeGB = storage.DiskTotalSpace && storage.DiskUsedSpace
-                  ? ((storage.DiskTotalSpace - storage.DiskUsedSpace) / (1024 * 1024 * 1024)).toFixed(1)
-                  : null;
-                const usagePercent =
-                  storage.DiskTotalSpace && storage.DiskUsedSpace
-                    ? ((storage.DiskUsedSpace / storage.DiskTotalSpace) * 100).toFixed(0)
-                    : null;
+                const total = storage.DiskTotalSpace;
+                const used = storage.DiskUsedSpace;
+                const eventCount = storageEventCounts?.[storage.Id];
 
+                // Options > Storage in ZoneMinder: the percentage truncates
+                // (intval), unlike the console navbar's, which rounds. DiskSpace
+                // is a running total that can drift below zero; it is shown,
+                // not hidden, as ZoneMinder shows it.
                 return (
                   <div
                     key={storage.Id}
@@ -512,40 +591,15 @@ export default function Server() {
                     <div className="text-xs text-muted-foreground truncate" title={storage.Path ?? undefined}>
                       {storage.Path}
                     </div>
-                    {/* DiskSpace is ZoneMinder's running total of event sizes, not
-                        a live sum, so it can drift below zero; zmaudit resyncs it
-                        (refs #539). */}
-                    {storage.DiskSpace != null && (storage.DiskSpace < 0 ? (
-                      <div className="text-xs text-orange-600 dark:text-orange-400 mt-1" data-testid={`storage-events-drifted-${storage.Id}`}>
-                        {t('server.storage_events_drifted')}
+                    {total != null && used != null && (
+                      <div className="text-xs mt-1" data-testid={`storage-usage-${storage.Id}`}>
+                        {total ? `${Math.trunc((100 * used) / total)}% ` : ''}
+                        {t('server.used_of_total', { used: zmHumanFilesize(used), total: zmHumanFilesize(total) })}
                       </div>
-                    ) : (
+                    )}
+                    {eventCount !== undefined && (
                       <div className="text-xs mt-1" data-testid={`storage-events-${storage.Id}`}>
-                        {t('server.storage_events')}: {(storage.DiskSpace / (1024 * 1024 * 1024)).toFixed(1)} GB
-                      </div>
-                    ))}
-                    {totalGB && freeGB && (
-                      <div className="mt-2">
-                        <div className="flex justify-between text-xs mb-1">
-                          <span data-testid={`storage-free-${storage.Id}`}>
-                            {freeGB} GB {t('server.storage_free')}
-                          </span>
-                          <span data-testid={`storage-total-${storage.Id}`}>
-                            {totalGB} GB {t('server.storage_total')}
-                          </span>
-                        </div>
-                        <div className="w-full bg-muted rounded-full h-2">
-                          <div
-                            className={`h-2 rounded-full ${
-                              Number(usagePercent) > 90
-                                ? 'bg-red-500'
-                                : Number(usagePercent) > 75
-                                  ? 'bg-yellow-500'
-                                  : 'bg-primary'
-                            }`}
-                            style={{ width: `${Math.min(Number(usagePercent), 100)}%` }}
-                          />
-                        </div>
+                        {t('server.storage_events_using', { count: eventCount, size: zmHumanFilesize(storage.DiskSpace || 0) })}
                       </div>
                     )}
                   </div>

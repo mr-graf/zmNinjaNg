@@ -76,6 +76,22 @@ const DiskPercentSchema = z.object({
   percent: z.coerce.number().optional(),
 });
 
+// One Server_Stats row, written by zmstats about once a minute.
+const ServerStatSchema = z.object(
+  withFieldCatch({
+    TimeStamp: z.string(),
+    ServerId: z.coerce.string().optional(),
+    CpuLoad: z.coerce.number().optional(),
+    CpuUsagePercent: z.coerce.number().optional(),
+    TotalSwap: z.coerce.number().optional(),
+    FreeSwap: z.coerce.number().optional(),
+  }, ['TimeStamp']),
+);
+
+const ServerStatsResponseSchema = z.object({
+  serverstats: tolerantArray(z.object({ ServerStat: ServerStatSchema }), 'server stat'),
+});
+
 const DaemonCheckSchema = z.object({
   result: z.coerce.number(),
 });
@@ -107,6 +123,7 @@ const StoragesResponseSchema = z.object({
 export type Server = z.infer<typeof ServerSchema>;
 export type ServersResponse = z.infer<typeof ServersResponseSchema>;
 export type Storage = z.infer<typeof StorageSchema>;
+export type ServerStat = z.infer<typeof ServerStatSchema>;
 
 export interface ServerLoad {
   load: number | number[];
@@ -159,6 +176,19 @@ export async function getStorages(client: ApiClient): Promise<Storage[]> {
 }
 
 /**
+ * Count the events stored in a storage area, the figure ZoneMinder's
+ * Options > Storage table shows before "using". One row is enough: ZoneMinder
+ * reports the full match size in `pagination.count`.
+ */
+export async function getStorageEventCount(client: ApiClient, storageId: string): Promise<number> {
+  const response = await client.get<{ pagination?: { count?: number } }>(
+    `/events/index/${encodeURIComponent(`StorageId:${storageId}`)}.json`,
+    { params: { limit: 1 }, intent: `Count events in storage ${storageId}` },
+  );
+  return response.data.pagination?.count ?? 0;
+}
+
+/**
  * Check if ZoneMinder daemon is running
  *
  * Calls /host/daemonCheck.json to verify if the core service is active.
@@ -202,6 +232,41 @@ export async function getLoad(client: ApiClient, apiBaseUrl?: string): Promise<S
   const loadValue = Array.isArray(validated.load) ? validated.load[0] : validated.load;
 
   return { load: loadValue };
+}
+
+/**
+ * Get the newest Server_Stats row, which is where ZoneMinder's console reads
+ * its Load and Cpu figures.
+ *
+ * The endpoint returns every stored row oldest first and has no limit, so the
+ * caller passes a server-local 'YYYY-MM-DD HH:mm:ss' lower bound and this takes
+ * the last row. Needs ZoneMinder 1.37.61 or newer for the filter.
+ *
+ * The console reads the row of the server it runs on; the caller names that
+ * server (see `zmThisServerId`), and rows of other servers are ignored.
+ *
+ * @returns The newest row of `serverId`, or undefined when it has none newer
+ *   than `since`
+ */
+export async function getLatestServerStat(
+  client: ApiClient,
+  since: string,
+  serverId: string,
+): Promise<ServerStat | undefined> {
+  const endpoint = `/server_stats/index/${encodeURIComponent(`TimeStamp >=:${since}`)}.json`;
+  const response = await client.get(endpoint);
+
+  const validated = validateApiResponse(ServerStatsResponseSchema, response.data, {
+    endpoint,
+    method: 'GET',
+  });
+
+  // Server::ReadStats: the newest row of one server. Rows without a ServerId
+  // predate multi-server stats and belong to the single-server id 0.
+  return validated.serverstats
+    .map((r) => r.ServerStat)
+    .filter((r) => (r.ServerId ?? '0') === serverId)
+    .at(-1);
 }
 
 /**

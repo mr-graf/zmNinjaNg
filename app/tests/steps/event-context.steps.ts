@@ -34,6 +34,44 @@ When('I open the around-this-event panel on the first event', async ({ page }) =
   log.info('E2E event-context baseline captured', { component: 'e2e', count: baselineRowIds.length });
 });
 
+// Refs #547: an event playing behind the panel used to finish and let
+// continuous play navigate the panel away. MP4 shows as a <video>, ZMS as the
+// player's play/pause button; whichever the event uses must be running before
+// the panel opens, so the stopped check below can fail.
+const detailVideo = (page: Page) => page.getByTestId('event-detail-scroller').locator('video');
+const zmsPlayPause = (page: Page) => page.getByTestId('zms-play-pause');
+
+async function isPlaybackRunning(page: Page): Promise<boolean | null> {
+  if (await detailVideo(page).count()) return detailVideo(page).first().evaluate((v: HTMLVideoElement) => !v.paused);
+  if (await zmsPlayPause(page).count()) return (await zmsPlayPause(page).getAttribute('title')) === 'Pause';
+  return null;
+}
+
+When("I open the first event's detail page with playback running", async ({ page }) => {
+  const firstCard = page.getByTestId('event-card').first();
+  await firstCard.waitFor({ state: 'visible', timeout: testConfig.timeouts.element });
+  await firstCard.click();
+  await page.waitForURL(/.*events\/\d+/, { timeout: testConfig.timeouts.transition });
+
+  await expect.poll(async () => (await detailVideo(page).count()) + (await zmsPlayPause(page).count()), {
+    timeout: testConfig.timeouts.transition * 3,
+  }).toBeGreaterThan(0);
+  // Autoplay may be off; start an MP4 so the event is playing either way.
+  if (await detailVideo(page).count()) {
+    await detailVideo(page).first().evaluate((v: HTMLVideoElement) => { v.muted = true; return v.play(); });
+  }
+  await expect.poll(() => isPlaybackRunning(page), { timeout: testConfig.timeouts.transition }).toBe(true);
+});
+
+When('I open the around-this-event panel from the event detail page', async ({ page }) => {
+  await page.getByTestId('event-context-open').click();
+  await expect(panel(page)).toBeVisible({ timeout: testConfig.timeouts.transition });
+});
+
+Then("the event's playback is stopped", async ({ page }) => {
+  await expect.poll(() => isPlaybackRunning(page), { timeout: testConfig.timeouts.transition }).toBe(false);
+});
+
 Then('I should see the event context panel', async ({ page }) => {
   await expect(panel(page)).toBeVisible({ timeout: testConfig.timeouts.transition });
 });
@@ -119,6 +157,67 @@ Then('sequence play lays its tiles out in {int} columns', async ({ page }, cols:
   await expect.poll(() => tiles.count(), { timeout: testConfig.timeouts.transition }).toBe(Math.min(12, sequenceListIds.length));
   const tops = await tiles.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
   expect(tops.filter((top) => top === tops[0])).toHaveLength(Math.min(cols, tops.length));
+});
+
+// Sizes before the corner drag, so the outcome compares against them.
+let beforeDrag: { tile: { width: number; height: number }; grid: { width: number; height: number } } | null = null;
+
+When('I press the sequence play resize pencil', async ({ page }) => {
+  if (!sequenceListIds) return;
+  const toggle = page.getByTestId('event-context-sequence-resize-toggle');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+});
+
+When('I scroll to zoom into the first sequence play tile', async ({ page }) => {
+  if (!sequenceListIds) return;
+  const tile = page.getByTestId('event-context-sequence').locator('[data-testid^="event-context-sequence-tile-"]').first();
+  const box = (await tile.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 3);
+  for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -120);
+});
+
+When('I release the sequence play resize pencil', async ({ page }) => {
+  if (!sequenceListIds) return;
+  const toggle = page.getByTestId('event-context-sequence-resize-toggle');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+});
+
+Then('the first sequence play tile is still zoomed in', async ({ page }) => {
+  if (!sequenceListIds) return;
+  const zoom = page.getByTestId('event-context-sequence').locator('[data-testid^="event-context-sequence-zoom-"]').first();
+  await expect.poll(() => zoom.evaluate((el) => new DOMMatrix(getComputedStyle(el).transform).a)).toBeGreaterThan(1.2);
+});
+
+When("I drag the first sequence play tile's bottom right corner outward", async ({ page }) => {
+  if (!sequenceListIds) return;
+  const sequence = page.getByTestId('event-context-sequence');
+  const tile = sequence.locator('[data-testid^="event-context-sequence-tile-"]').first();
+  const grid = sequence.getByTestId('event-context-sequence-grid-tiles');
+  // The dialog zooms in as it opens; measure once it has settled.
+  // Its own animation only: playing tiles blink forever.
+  await sequence.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished.catch(() => undefined))));
+  const tileBox = (await tile.boundingBox())!;
+  const gridBox = (await grid.boundingBox())!;
+  beforeDrag = { tile: tileBox, grid: gridBox };
+  const handle = sequence.locator('[data-testid^="event-context-sequence-resize-"][data-testid$="-br"]').first();
+  const h = (await handle.boundingBox())!;
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(h.x + tileBox.width / 2, h.y + tileBox.height / 2, { steps: 5 });
+  await page.mouse.up();
+});
+
+Then('the first sequence play tile is larger and the grid keeps its size', async ({ page }) => {
+  if (!sequenceListIds || !beforeDrag) return;
+  const sequence = page.getByTestId('event-context-sequence');
+  const tile = (await sequence.locator('[data-testid^="event-context-sequence-tile-"]').first().boundingBox())!;
+  const grid = (await sequence.getByTestId('event-context-sequence-grid-tiles').boundingBox())!;
+  // Area, not each side: with one row of tiles only the width can give.
+  expect(tile.width * tile.height).toBeGreaterThan(beforeDrag.tile.width * beforeDrag.tile.height * 1.2);
+  expect(Math.abs(grid.width - beforeDrag.grid.width)).toBeLessThan(2);
+  expect(Math.abs(grid.height - beforeDrag.grid.height)).toBeLessThan(2);
 });
 
 When('I pick {int} replay tiles in settings', async ({ page }, n: number) => {

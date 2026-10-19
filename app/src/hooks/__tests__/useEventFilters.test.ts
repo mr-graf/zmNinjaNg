@@ -112,6 +112,42 @@ describe('useEventFilters first-render hydration (refs #197)', () => {
     expect(result.current.startDateInput).not.toBe('');
     expect(result.current.activeQuickRange).toBeNull();
   });
+
+  // The stored filter is what a preset saves, so it has to match the screen:
+  // a deep link resets the fields the URL does not carry, and the store must
+  // follow (refs #544).
+  it('stores the whole filter a deep link shows, including the fields the URL does not carry', () => {
+    mockSearchParams.set('monitorId', '1');
+    setupMocks({ onlyDetectedObjects: true, linkedFilter: 'hide', activeQuickRange: 4, tagIds: ['9'] });
+
+    const { result } = renderCapturingFilters();
+
+    expect(result.current.onlyDetectedObjects).toBe(false);
+    expect(useSettingsStore.getState().getProfileSettings('profile-1').eventsPageFilters).toEqual({
+      ...DEFAULT_SETTINGS.eventsPageFilters,
+      monitorIds: ['1'],
+    });
+  });
+
+  // Refs #546: the loaded preset no longer describes the filter on screen.
+  it('drops the loaded preset name when a deep link replaces the filter', () => {
+    mockSearchParams.set('monitorId', '1');
+    setupMocks();
+    useSettingsStore.getState().updateProfileSettings('profile-1', { activeEventFilterPreset: 'Night' });
+
+    renderCapturingFilters();
+
+    expect(useSettingsStore.getState().getProfileSettings('profile-1').activeEventFilterPreset).toBe('');
+  });
+
+  it('keeps the loaded preset name when Events opens without URL filters', () => {
+    setupMocks();
+    useSettingsStore.getState().updateProfileSettings('profile-1', { activeEventFilterPreset: 'Night' });
+
+    renderCapturingFilters();
+
+    expect(useSettingsStore.getState().getProfileSettings('profile-1').activeEventFilterPreset).toBe('Night');
+  });
 });
 
 describe('useEventFilters', () => {
@@ -793,5 +829,77 @@ describe('useEventFilters - linked event cause', () => {
 
     expect(result.current.linkedFilter).toBe('all');
     expect(result.current.filters.causeExclude).toBeUndefined();
+  });
+});
+
+// A saved quick range means "the past N hours", so reopening the page must
+// measure it back from now, not keep the window from the day it was picked.
+// Otherwise the 4h chip lights up over a list that misses every new event (refs #556).
+describe('useEventFilters persisted quick range (refs #556)', () => {
+  beforeEach(() => {
+    Array.from(mockSearchParams.keys()).forEach((key) => mockSearchParams.delete(key));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 9, 10, 12, 0, 0));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    resetProfileFixture();
+    resetFakeStoreGates();
+  });
+
+  it('re-anchors a saved quick range to now on the first render and after effects', () => {
+    setupMocks({ activeQuickRange: 4, startDateTime: '2026-10-01T08:00:00', endDateTime: '2026-10-01T12:00:00' });
+
+    const startPerRender: (string | undefined)[] = [];
+    const { result } = renderHook(() => {
+      const r = useEventFilters();
+      startPerRender.push(r.filters.startDateTime);
+      return r;
+    });
+
+    expect(startPerRender[0]).toBe('2026-10-10T08:00:00');
+    expect(result.current.filters.startDateTime).toBe('2026-10-10T08:00:00');
+    expect(result.current.filters.endDateTime).toBe('2026-10-10T12:00:00');
+    expect(result.current.activeQuickRange).toBe(4);
+  });
+
+  it('moves a quick range window up to now on refresh', () => {
+    setupMocks({ activeQuickRange: 4, startDateTime: '2026-10-10T08:00:00', endDateTime: '2026-10-10T12:00:00' });
+    const { result } = renderHook(() => useEventFilters());
+
+    vi.setSystemTime(new Date(2026, 9, 10, 13, 0, 0));
+    let moved = false;
+    act(() => {
+      moved = result.current.refreshQuickRange();
+    });
+
+    expect(moved).toBe(true);
+    expect(result.current.filters.startDateTime).toBe('2026-10-10T09:00:00');
+    expect(result.current.filters.endDateTime).toBe('2026-10-10T13:00:00');
+    expect(mockSetSearchParams.mock.lastCall?.[0].get('endDateTime')).toBe('2026-10-10T13:00:00');
+  });
+
+  it('leaves an explicit range alone on refresh so the caller refetches it', () => {
+    setupMocks({ activeQuickRange: null, startDateTime: '2026-10-01T08:00:00', endDateTime: '2026-10-01T12:00:00' });
+    const { result } = renderHook(() => useEventFilters());
+
+    vi.setSystemTime(new Date(2026, 9, 10, 13, 0, 0));
+    let moved = true;
+    act(() => {
+      moved = result.current.refreshQuickRange();
+    });
+
+    expect(moved).toBe(false);
+    expect(result.current.filters.endDateTime).toBe('2026-10-01T12:00:00');
+  });
+
+  it('keeps a saved explicit range as it was', () => {
+    setupMocks({ activeQuickRange: null, startDateTime: '2026-10-01T08:00:00', endDateTime: '2026-10-01T12:00:00' });
+
+    const { result } = renderHook(() => useEventFilters());
+
+    expect(result.current.filters.startDateTime).toBe('2026-10-01T08:00:00');
+    expect(result.current.filters.endDateTime).toBe('2026-10-01T12:00:00');
   });
 });

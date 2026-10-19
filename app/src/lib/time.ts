@@ -102,3 +102,31 @@ export function formatLocalDateTime(date: Date): string {
 export function formatLocalDateTimeSeconds(date: Date): string {
     return `${formatLocalDateTime(date)}:${String(date.getSeconds()).padStart(2, '0')}`;
 }
+
+/**
+ * The window a quick-range chip stands for, ending now: midnight local time
+ * for `hours` 0 ("Today"), otherwise the last `hours` hours.
+ */
+export function quickRangeDates(hours: number, end: Date = new Date()): { start: Date; end: Date } {
+    const start = new Date(end);
+    if (hours === 0) {
+        start.setHours(0, 0, 0, 0);
+    } else {
+        start.setTime(end.getTime() - hours * 60 * 60 * 1000);
+    }
+    return { start, end };
+}
+
+/**
+ * A persisted filter with its quick range measured back from now. A saved
+ * quick range means "the past N hours", not the window it covered when it was
+ * picked (refs #556); an explicit range passes through unchanged.
+ */
+export function withFreshQuickRange<T extends { startDateTime: string; endDateTime: string; activeQuickRange?: number | null }>(
+    saved: T,
+    format: (date: Date) => string = formatLocalDateTimeSeconds,
+): T {
+    if (saved.activeQuickRange == null) return saved;
+    const { start, end } = quickRangeDates(saved.activeQuickRange);
+    return { ...saved, startDateTime: format(start), endDateTime: format(end) };
+}

@@ -55,6 +55,14 @@ export const MAX_QUERY_RETRIES = 1;
  */
 export const DEFAULT_QUERY_STALE_TIME_MS = 15000;
 
+/**
+ * How far back the Server page asks for `Server_Stats` rows. zmstats writes one
+ * row a minute, and the API cannot limit to the newest row, so the page asks for
+ * this window and takes the last row. The margin covers clock drift between the
+ * device and the server.
+ */
+export const SERVER_STATS_WINDOW_MINUTES = 10;
+
 export const ZM_INTEGRATION = {
   // HTTP timeouts for ZM API calls
   httpTimeout: 10000, // 10 seconds - standard API calls
@@ -269,10 +277,13 @@ export const EVENT_CONTEXT = {
   sequenceGridSizes: [2, 3, 4] as const,
   sequenceDefaultGrid: 3,
   /** Replay dialog height, in rem, taken by its toolbar and padding, and by
-   *  each tile row's monitor name. From `sm` up the dialog is as wide as an
-   *  N x N block of 16:9 tiles can be while it fits on screen. */
+   *  each tile row's monitor name. From `sm` up the dialog is as wide as its
+   *  block of 16:9 tiles can be while its filled rows fit on screen. */
   sequenceChromeRem: 3,
   sequenceRowLabelRem: 1.25,
+  /** The smallest share of the grid's width or height a replay row or column
+   *  can be dragged down to, so no tile vanishes (refs #534). */
+  sequenceMinTrackShare: 0.1,
   /** Two taps on one Sequence play tile this close together open its event;
    *  one tap plays it (refs #534). Timed by hand, not `dblclick`, which touch
    *  WebViews do not fire reliably. */
@@ -282,10 +293,6 @@ export const EVENT_CONTEXT = {
    *  URLs cap out near 8KB. Nothing narrows the answer afterwards: a wider
    *  result is the deliberate trade against failing the request. */
   maxMonitorIds: 40,
-  /** Ribbon lane row height, in pixels. */
-  ribbonLaneHeight: 14,
-  /** Lanes visible before the ribbon scrolls inside its own box. */
-  ribbonMaxLanes: 8,
 } as const;
 
 /**
@@ -372,6 +379,16 @@ export const API_PAGINATION = {
  * Recent-events list shown under the live view on the monitor detail page.
  * Count is a per-profile setting; these are its default and clamp bounds.
  */
+/**
+ * Auto-refresh for the Events and Timeline pages, in seconds; 0 is off. The
+ * floor keeps a typo like 1 from polling ZoneMinder every second.
+ */
+export const EVENTS_AUTO_REFRESH = {
+  minSeconds: 10,
+  maxSeconds: 3600,
+  presets: [0, 30, 60],
+} as const;
+
 export const MONITOR_DETAIL_RECENT_EVENTS = {
   defaultCount: 20,
   minCount: 1,
@@ -495,6 +512,9 @@ export const EVENT_FRAME_THUMB_WIDTH = 240;
 /** localStorage key holding the event frame carousel's expanded state. */
 export const EVENT_FRAMES_OPEN_STORAGE_KEY = 'zmninja-event-frames-open';
 
+/** localStorage key holding the ZMS player's speed and frame-jump card expanded state. */
+export const ZMS_PLAYBACK_OPTIONS_OPEN_STORAGE_KEY = 'zmninja-zms-playback-options-open';
+
 /**
  * Relative time labels on events (issue #210).
  * List chip only renders for events within this many days; older events read
@@ -552,7 +572,6 @@ export const STORAGE_KEYS = {
   // UI section open/closed state
   hoverPreviewOpen: 'zmng-hover-preview-open',
   thumbnailChainOpen: 'zmng-thumbnail-chain-open',
-  eventContextRibbonOpen: 'zmng-event-context-ribbon-open',
   /** Nearby replay mode, 'in-order' or 'all' (refs #534). */
   eventContextReplayGrid: 'zmng-event-context-replay-grid',
   // Prefix, completed with a settings section id (see CollapsibleSection).

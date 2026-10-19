@@ -1,5 +1,50 @@
 # Changelog
 
+## [zmNinjaNg-2.8.0](https://github.com/ZoneMinder/zmNinjaNg/tree/zmNinjaNg-2.8.0) (2026-10-18)
+
+[Full Changelog](https://github.com/ZoneMinder/zmNinjaNg/compare/zmNinjaNg-2.7.0...zmNinjaNg-2.8.0)
+
+**Implemented enhancements:**
+
+- User guide: add screenshots of the key screens [\#564](https://github.com/ZoneMinder/zmNinjaNg/issues/564)
+- Event detail, sidebar and notices: surface date, length and version [\#562](https://github.com/ZoneMinder/zmNinjaNg/issues/562)
+- Events page does not refresh on opening + add event refresh option [\#556](https://github.com/ZoneMinder/zmNinjaNg/issues/556)
+- fix\(monitor\): show camera power and reset controls [\#553](https://github.com/ZoneMinder/zmNinjaNg/issues/553)
+
+**Fixed bugs:**
+
+- If "Continue" is enabled, trying to view Nearby events it starts the next event [\#547](https://github.com/ZoneMinder/zmNinjaNg/issues/547)
+- Event Filter should be cleared when viewing monitor events [\#546](https://github.com/ZoneMinder/zmNinjaNg/issues/546)
+
+**Closed issues:**
+
+- test\(e2e\): steps after a monitor card click act on the outgoing Monitors page [\#559](https://github.com/ZoneMinder/zmNinjaNg/issues/559)
+- chore\(ci\): lint PR bodies for slop-mop's mechanical tells [\#557](https://github.com/ZoneMinder/zmNinjaNg/issues/557)
+- In landscape mode, Live view opens in fullscreen with option disabled [\#552](https://github.com/ZoneMinder/zmNinjaNg/issues/552)
+- Enhancement: Nearby Events Replay grid hover [\#551](https://github.com/ZoneMinder/zmNinjaNg/issues/551)
+
+## [zmNinjaNg-2.7.0](https://github.com/ZoneMinder/zmNinjaNg/tree/zmNinjaNg-2.7.0) (2026-10-04)
+
+[Full Changelog](https://github.com/ZoneMinder/zmNinjaNg/compare/zmNinjaNg-2.6.0...zmNinjaNg-2.7.0)
+
+**Implemented enhancements:**
+
+- Feature:  Filter presets [\#544](https://github.com/ZoneMinder/zmNinjaNg/issues/544)
+- Reorganize Settings and make each setting save and read from one scope [\#536](https://github.com/ZoneMinder/zmNinjaNg/issues/536)
+- Nearby replay: play nearby events back together, in time order [\#534](https://github.com/ZoneMinder/zmNinjaNg/issues/534)
+- Wrap around when swiping past the first or last monitor [\#533](https://github.com/ZoneMinder/zmNinjaNg/issues/533)
+- Settings: search to filter settings, including collapsed sections [\#531](https://github.com/ZoneMinder/zmNinjaNg/issues/531)
+
+**Fixed bugs:**
+
+- plain white icon in the Android Notification bar [\#540](https://github.com/ZoneMinder/zmNinjaNg/issues/540)
+- Server page disk figures are labeled as something they don't measure [\#539](https://github.com/ZoneMinder/zmNinjaNg/issues/539)
+- Monitors live view swiping [\#527](https://github.com/ZoneMinder/zmNinjaNg/issues/527)
+
+**Closed issues:**
+
+- Server page: show the stats ZoneMinder's console shows instead of the ZM\_DIR\_EVENTS disk [\#542](https://github.com/ZoneMinder/zmNinjaNg/issues/542)
+
 ## [zmNinjaNg-2.6.0](https://github.com/ZoneMinder/zmNinjaNg/tree/zmNinjaNg-2.6.0) (2026-09-25)
 
 [Full Changelog](https://github.com/ZoneMinder/zmNinjaNg/compare/zmNinjaNg-2.5.0...zmNinjaNg-2.6.0)
@@ -11,7 +56,6 @@
 
 **Fixed bugs:**
 
-- Monitors live view swiping [\#527](https://github.com/ZoneMinder/zmNinjaNg/issues/527)
 - Images not shown on zmNinjaNG [\#507](https://github.com/ZoneMinder/zmNinjaNg/issues/507)
 
 **Closed issues:**

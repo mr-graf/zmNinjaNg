@@ -682,8 +682,33 @@ the browser value:
 The plugin's TypeScript surface (``SafeAreaInsets``, ``SafeAreaPlugin``) is in
 ``plugins/safe-area/definitions.ts``; the web stub never invokes the listener.
 
+``SheetContent`` (``components/ui/sheet.tsx``) insets its box by
+``--sai-left`` and ``--sai-right``, so every sheet clears the Dynamic Island
+or a cutout when a phone is in landscape, whatever padding the caller sets.
+
 **Used by:** ``main.tsx``, plus the CSS in ``index.css`` and component styles
 that consume ``var(--sai-*)``.
+
+Tap jitter guard (``lib/tap-jitter-guard.ts``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An iPhone in landscape sends one small ``touchmove`` with most taps. Every
+Radix modal (``Dialog``, ``Sheet``, ``AlertDialog``, a modal
+``DropdownMenu``) mounts ``react-remove-scroll`` to stop the page behind it
+scrolling, and that library cancels any ``touchmove`` over content that
+cannot scroll, however small. When the move is cancelled, WebKit does not
+turn the tap into a click, so buttons in a dialog ignored most taps in
+landscape.
+
+``installTapJitterGuard()`` adds capture listeners on ``window``, which run
+before anything else sees the event. A one-finger move that stays within
+``UI_INTERACTIONS.moveCancelPx`` of the touch start is stopped there; once
+the finger goes past that, the gesture is a drag and every move goes
+through. Pinches are never held back. The app's own touch handlers measure
+from the ``touchstart`` point, so they lose nothing by missing the first
+few pixels. It returns a function that removes the listeners.
+
+**Used by:** ``main.tsx``, on iOS only.
 
 API validator (``lib/zm/api-validator.ts``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1356,8 +1381,46 @@ with no Apply button in the persistence path.
   the pre-update state, so without the override it writes the previous range
   to the URL, and the URL-readback effect reflects that stale range back into
   state.
+- ``loadFilters(saved)`` replaces every field with a saved
+  ``eventsPageFilters`` snapshot through the wrapped setters, so the snapshot
+  persists, and rewrites the URL filter params in the same pass. A saved quick
+  range is recomputed from the current time with ``quickRangeDates()``
+  (``lib/time.ts``), the same helper the quick-range chips use.
 
 **Used by:** the Events page, ``EventsFilterPopover``.
+
+useEventFilterPresets (``hooks/useEventFilterPresets.ts``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Saves, loads and deletes named copies of the Events filter (refs #544).
+
+- ``eventFilterPresets`` holds ``{ name, filters }`` entries, where
+  ``filters`` is a copy of ``eventsPageFilters``. ``activeEventFilterPreset``
+  holds the name of the preset last loaded or saved, or ``''``. Both keys live
+  in the current selection's settings bucket, next to ``eventsPageFilters``.
+- ``save(name)`` copies the persisted ``eventsPageFilters``, replacing a preset
+  of the same name in place, and marks it loaded.
+- ``load(name)`` hands the preset's snapshot to ``useEventFilters``'s
+  ``loadFilters``, which the caller passes in.
+- ``remove()`` deletes the loaded preset. ``clearActive()`` forgets which one
+  is loaded; the Events page calls it from the filter panel's Clear button.
+
+``EventFilterPresetActions`` (``components/events/``) renders the loaded
+preset's name and the save, load and delete buttons. ``EventsFilterPopover``
+takes the hook's values as its ``presets`` prop, renders the actions, and
+passes them to ``MonitorFilterPopoverContent`` through ``headerActions``,
+which places them to the right of the "Filters" heading. The popover wraps
+``onSave`` so it first commits the date fields (``applyDates``): those fields
+are uncontrolled and reach the store only on Apply or Enter, and ``save``
+reads the store. The delete button renders only while a preset is loaded,
+and deletes after an ``AlertDialog`` confirmation.
+
+The store has to match the screen for a save to be accurate. The Events page
+sets ``activeQuickRange`` from either set of quick-range chips and clears it
+when a typed date is applied, and a deep link stores the whole filter it
+produces, including the fields the URL does not carry, which it resets.
+
+**Used by:** the Events page.
 
 useScrollRestoration (``hooks/useScrollRestoration.ts``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -4,6 +4,14 @@ The Events screen lets you browse and play back recorded events from your ZoneMi
 
 ## Event List
 
+```{figure} ../_static/img/screens/events/list.jpg
+:align: right
+:width: 240px
+:alt: Events list on a phone, with quick date ranges and event cards
+
+The Events list on a phone
+```
+
 Events are displayed as cards showing:
 
 - **Thumbnail** - A snapshot from the event
@@ -21,7 +29,7 @@ In a {doc}`profiles` group, the group-by-server toggle in the toolbar splits the
 
 Above the sections is a row of server buttons, each with the number of that server's events on screen. Press one to jump to its section. Pressing a section's own header folds that server away and pressing it again brings it back; the header keeps its count while folded, and the totals and filters do not change. This is not the server filter, which drops a server's events from the page altogether. Folded sections are remembered on this device, so they stay folded when you open an event and come back, or reload the app. Jumping to a folded server unfolds it first.
 
-On desktop, hovering over a thumbnail for a moment shows a 400px-wide preview anchored next to the row. The preview loads a higher-resolution image from the server. The underlying card remains clickable while the preview is visible, so you can still click to open the event.
+On desktop, hovering over a thumbnail for a moment shows a larger preview next to the row, sized to about 70% of the window. The preview loads a higher-resolution image from the server. The underlying card remains clickable while the preview is visible, so you can still click to open the event.
 
 ## Deleting Multiple Events
 
@@ -38,15 +46,49 @@ The same selection and delete flow is available in the Recent Events list on a m
 
 ## Filtering Events
 
+```{figure} ../_static/img/screens/events/filters.jpg
+:align: center
+:width: 358px
+:alt: The Events filter panel with Filter and Clear buttons, the Filters heading with save and load icons, a monitor checklist, and switches for favorites, archived and detected objects
+
+The filter panel on the Events page
+```
+
 Filter events using the controls at the top:
 
-- **Date range** - Select a start and end date. A date you type applies when you press Apply or Enter, so you can finish typing it and move between the two fields first. The quick range buttons below apply as soon as you press them.
+- **Date range** - Select a start and end date. A date you type applies when you press Apply or Enter, so you can finish typing it and move between the two fields first. The quick range buttons below apply as soon as you press them. The quick range you pick is remembered, and each time you open Events (or Timeline) it covers that many hours back from now, so new events show up without pressing it again. Pulling down to refresh the list moves the window up to now as well. So does **Auto-refresh** under Events & Playback in {doc}`settings`, which reloads the list on its own every so many seconds.
 - **Monitor** - Show events from a specific camera only. In a {doc}`profiles` group the picker groups cameras by server, and picking from one server narrows the list to that server's events - the other servers drop out rather than showing everything they have.
 - **Linked events** - ZoneMinder records a monitor whenever a monitor it is linked to alarms, and writes `Linked` as the cause. Choose **All** to leave those events in place, **Only** to see nothing else, or **Hide** to keep them out of the list. The choice is remembered for that server.
 - **Groups** - Filter by monitor group
 - **Favorites only** - Show only events you have starred. This works across all your favorites, including ones older than the first page of results.
 - **Tags** - Show only events carrying the tags you pick (if your server supports tags). Select several tags to see events with any of them, or "All" for events with any tag. Like favorites, this covers tagged events older than the first page. In a {doc}`profiles` group the list offers each tag name once, however many servers in it define it, and picking one matches that name on every server. A server that has no tag by that name contributes no events, so filtering by a tag only one of your servers uses shows you only that server's events.
 - **Archived only** - Restrict the list to archived events. To archive an event, open it in the event detail screen and use the archive action.
+
+### Saved filters
+
+```{figure} ../_static/img/screens/events/saved-filters.jpg
+:align: center
+:width: 360px
+:alt: The Save filter dialog with a Name field and Save and Cancel buttons
+
+Naming a filter before saving it
+```
+
+The buttons next to the **Filters** heading in the filter panel save the current filter under a name and bring it back later. A saved filter keeps every choice in the panel: monitors, tags, dates, favorites, archived, detected objects and linked events. The group selector sits outside the panel and is not saved.
+
+- **Save** asks for a name. It saves what the panel shows, including dates you typed but did not apply yet. Saving under a name already in use replaces that filter. After you load a filter, the name box starts with its name, so changing a filter and saving it again updates it.
+- **Load** lists your saved filters. Picking one replaces the whole current filter, and its name appears in small text beside the buttons. A filter saved with a quick range such as "past 4 hours" covers the past 4 hours from the moment you load it. A filter saved with typed dates keeps those dates. Typing a date after picking a quick range turns the quick range off, so the typed dates are what gets saved.
+- **Delete** appears only while a saved filter is loaded, and removes that filter after you confirm. The filter in the panel stays as it is.
+
+**Clear** empties the filter, including dates you typed but did not apply, and the name and delete button go away until you load a saved filter again. They also go away when another screen opens Events with its own filter, such as **All Events** on a monitor, since that filter replaces the saved one. Saved filters belong to the profile, or to the profile group when one is selected.
+
+```{figure} ../_static/img/screens/events/toolbar.jpg
+:align: center
+:width: 360px
+:alt: The Events toolbar: group picker, grid view, filter, refresh and thumbnail labels buttons
+
+The Events toolbar
+```
 
 The eye button in the toolbar shows or hides the labels drawn over event
 thumbnails, such as how long ago an event happened. It is on by default. Turn
@@ -56,11 +98,27 @@ sit below each image, as they do in the list, so they never cover it.
 
 ## Event Playback
 
+```{figure} ../_static/img/screens/events/detail.jpg
+:align: right
+:width: 240px
+:alt: Event detail on a phone, with the player, the date and length line, the Event frames strip and the Details card
+
+An event opened on a phone
+```
+
 Tap an event to open the event detail view, which includes:
 
 ### Event Frames
 
-Above the player is a strip of the significant still frames ZoneMinder keeps for the event, in order: the annotated object-detection image if machine learning wrote one, the alarm frame, then the snapshot. Only the frames the server actually has appear, so an event without object detection shows two entries and an event with no stored stills shows no strip at all.
+```{figure} ../_static/img/screens/events/frames.jpg
+:align: center
+:width: 360px
+:alt: The Event frames card with an Alarm and a Snapshot thumbnail
+
+The Event frames strip under the player
+```
+
+Below the player is a strip of the significant still frames ZoneMinder keeps for the event, in order: the annotated object-detection image if machine learning wrote one, the alarm frame, then the snapshot. Only the frames the server actually has appear, so an event without object detection shows two entries and an event with no stored stills shows no strip at all.
 
 Tap a frame to see it full size. Pinch, scroll the mouse wheel, or use the zoom buttons to magnify it, then drag to move around the image, the same as on the live monitor view. Playback stops while the image is open and resumes when you close it, unless you had already paused it.
 
@@ -83,6 +141,16 @@ ZMS playback renders frames one at a time from ZoneMinder's streaming server. Co
 - **Seek** - Jump to any point in the event
 - **Playback speed** - Adjust speed
 
+The event's start date and time sit just under the picture, above the controls. The speed presets, the jumps to the first alarm and max score frames, the alarmed frame count, and the max score frame thumbnail share a **Playback options** card that collapses when you tap its header; the app remembers whether you left it open or closed.
+
+```{figure} ../_static/img/screens/events/player-options.jpg
+:align: center
+:width: 360px
+:alt: The Playback Options card with speed presets from 0.25x to 4x, First Alarm Frame and Max Score Frame buttons, and the alarmed frame count
+
+The Playback options card
+```
+
 ZoneMinder's streaming server sometimes gives up part way through an event and leaves an error such as "Failed getting frame" on screen. The player notices the stream has stopped and starts a new one from the frame it stopped on, so playback continues without leaving the event. If the server fails at the same point every time, playback stops there after a few attempts; press Play to try again.
 
 #### Standard Controls
@@ -95,10 +163,18 @@ For video-based playback (HLS or MP4), the player provides:
 
 ### Event Info
 
-Details about the event:
+```{figure} ../_static/img/screens/events/details-card.jpg
+:align: center
+:width: 360px
+:alt: The Details card listing time, event ID, frames, score and resolution
 
-- Start and end time
-- Duration
+The Details card
+```
+
+The line under the player shows when the event started and, in brackets, how long it ran (30s, 1.5m, 1.5hr). The cards below it list:
+
+- Detected objects, first, when object detection found any
+- How long ago the event happened
 - Number of alarm and total frames
 - Monitor name and ID
 
@@ -115,17 +191,27 @@ bottom. The choice is remembered for that server.
 
 ### Continue
 
-The Continue button (list-video icon, next to All Events) plays events back-to-back for hands-free review. When it is on, an event finishing advances to the next event automatically, following the same filters as the Previous/Next buttons. A four-second message names the new monitor, its ID, and event time. When there are no more matching events, a "No more videos to play" message appears and playback stops.
+The Continue button (list-video icon, next to All Events) plays events back-to-back for hands-free review. When it is on, an event finishing advances to the next event automatically, following the same filters as the Previous/Next buttons. A four-second message names the new monitor, its ID, and event time. When there are no more matching events, a "No more videos to play" message appears and playback stops. An event you opened from [Nearby](#nearby), from the list or from Replay, continues to the next event in that Nearby list instead, and going back afterwards returns to the panel with the last played event highlighted.
 
 The toggle is remembered per profile: once turned on it stays on for future events. The playback speed you pick is also remembered and reused for each event in a run, on both the MP4 and ZMS players. So is the MP4 player's mute state: unmute once and every event you open afterwards on that profile starts with audio on, until you mute again. Fullscreen is not remembered: entering or leaving it changes only the event you are watching. To have every event open fullscreen, turn on **Open events in fullscreen** under Events & Playback in {doc}`settings`. Turning a phone to landscape also plays the event fullscreen for as long as it stays landscape, unless **Fullscreen when turned sideways** is off in {doc}`settings`. Either way the page itself goes fullscreen, MP4 or ZMS: the picture fills the screen with the player controls below it and a translucent close button in the top corner, and pinch to zoom keeps working. The MP4 player's own fullscreen button still uses the device's native fullscreen for the event you are watching.
 
 ## Nearby
 
-Every event card, montage tile, and the Timing card on the event detail page carry a link icon labeled "Nearby". Tapping it opens a panel - on the right on desktop, from the bottom on mobile - listing every event from other cameras that happened close to the one you tapped, useful for seeing what the rest of your cameras caught at the same moment.
+```{figure} ../_static/img/screens/events/nearby.jpg
+:align: right
+:width: 240px
+:alt: The Nearby events panel open over an event, with window buttons, camera scope buttons, a Replay button and a list of events
+
+The Nearby panel on a phone
+```
+
+Every event card and montage tile carries a link icon labeled "Nearby", and the event detail page has a compact Nearby button next to the date under the player. Tapping it opens a panel - on the right on desktop, from the bottom on mobile - listing every event from other cameras that happened close to the one you tapped, useful for seeing what the rest of your cameras caught at the same moment.
+
+Opening Nearby from the event detail page pauses the event, so it cannot finish and move on to the next one while you browse. Closing the panel resumes it if it was playing.
 
 Two controls at the top of the panel narrow what "close to" means:
 
-- **Window** - How far either side of the event to look: ±5, ±10, ±15, ±30, or ±60 minutes.
+- **Window** - How far either side of the event to look: ±1, ±5, ±10, ±15, ±30, or ±60 minutes.
 - **Cameras** - Which cameras to include:
   - **Linked** - The event's own camera plus any cameras ZoneMinder has linked to it.
   - **Group** - Every camera in any ZoneMinder group the event's camera belongs to.
@@ -134,9 +220,9 @@ Two controls at the top of the panel narrow what "close to" means:
 
 A camera scope with nothing to offer (the camera has no linked cameras, or belongs to no group) stays visible but greyed out rather than disappearing, so you can see why it is not an option. If the window comes up empty, a **Wider** link steps up to the next window size.
 
-A ribbon above the list shows one row per camera with a dot for each of its events in the window, so you can see at a glance which cameras were also busy; tapping a dot jumps to that event in the list below. From there, **Events** opens the same window and cameras on that page.
+**Events** opens the same window and cameras on the Events page.
 
-**Replay** opens up to 12 events (24 or 36 with **Replay tiles** in {doc}`settings`) around the one you tapped as tiles in time order, and plays them back. The button stays greyed out until the window holds at least two events. The grid button in the toolbar picks 2 × 2, 3 × 3 (the default) or 4 × 4: that many tiles fit on screen at once, and the rest are a scroll away. The choice is remembered on this device, and changing it mid-replay leaves playback running. They are split evenly between events before yours and events after it, taking the closest on each side. If one side has fewer, the other side fills the rest. When the window holds more, the toolbar says so, for example "Nearest 12 of 37". On a tablet or computer the replay grows to fill the screen, as far as the chosen grid still fits without scrolling.
+**Replay** opens up to 12 events (24 or 36 with **Replay tiles** in {doc}`settings`) around the one you tapped as tiles in time order, and plays them back. The button stays greyed out until the window holds at least two events. The grid button in the toolbar picks 2 × 2, 3 × 3 (the default) or 4 × 4: that many tiles fit on screen at once, and the rest are a scroll away. The choice is remembered on this device, and changing it mid-replay leaves playback running. They are split evenly between events before yours and events after it, taking the closest on each side. If one side has fewer, the other side fills the rest. When the window holds more, the toolbar says so, for example "Nearest 12 of 37". On a phone the replay fills the screen in either orientation. On a tablet or computer it grows to fill the screen, as far as the chosen grid still fits without scrolling. When there are too few events to fill every row, the tiles grow to use the free space. To make one tile bigger, tap the pencil in the toolbar, then drag any of the tile's corners. While the pencil is on, a yellow bracket marks each corner, as in Montage's edit mode, and the pointer turns into a resize arrow over it; on a phone you drag the corner with your finger. Each tile also zooms while the pencil is on, the same way the event and monitor views do: scroll or pinch over it to zoom, and drag to move around a zoomed picture. Tapping a tile does nothing while the pencil is on, so moving around does not restart the replay. Tap the pencil again to finish; the sizes and zoom stay. The tile's column and row grow, and the other tiles in them shrink so the grid stays the same size. Playback carries on while you drag. Picking a grid size or reopening the replay puts every tile back to the same size.
 
 Events that overlap in time play together, each starting at the moment its event started, so cameras that caught the same moment play it side by side. The next group starts only after every stream in the current one has played to its end, however long the server takes, so a very short event is never cut off. Stretches where no camera was recording are skipped. **Restart** starts playback over. A blinking triangle marks each tile that is playing, the others are dimmed, a thin line along the bottom of each tile shows how much of its event has played, and a tile that starts playing below the visible area scrolls into view. Playback runs at the hover preview **playback speed** set in {doc}`settings`. The screen stays on while the replay is open, whether or not **Insomnia** is on, and goes back to your usual setting when you close it.
 
@@ -148,9 +234,25 @@ The window and camera choice you last picked is remembered per profile and used 
 
 ## Event Montage
 
+```{figure} ../_static/img/screens/events/montage.jpg
+:align: right
+:width: 240px
+:alt: The Events page in grid view, with event thumbnails in two columns
+
+The Events grid on a phone
+```
+
 View events from multiple cameras at the same time, useful for reviewing an incident across several camera angles.
 
 ## Downloads
+
+```{figure} ../_static/img/screens/events/download.jpg
+:align: right
+:width: 184px
+:alt: The action buttons on an event detail page, with the download button last
+
+The download button, last in the event's action buttons
+```
 
 You can download event recordings:
 

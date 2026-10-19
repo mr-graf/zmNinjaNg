@@ -20,17 +20,21 @@
  * starts playback again.
  *
  * One tap on a tile restarts the replay from that tile; a second tap right
- * after opens its event.
+ * after opens its event. With the pencil pressed, dragging a tile's corner
+ * resizes it inside the grid (useGridTrackResize), and each tile zooms and
+ * pans like the event and monitor views (useZoomPan); taps do nothing then,
+ * so a pan does not restart the replay. Sizes and zoom stay after the pencil
+ * is released.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Grid2x2, LayoutGrid, RotateCcw } from 'lucide-react';
+import { Grid2x2, LayoutGrid, Pencil, RotateCcw } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../../ui/dialog';
 import { Button } from '../../ui/button';
 import { EventThumbnail } from '../EventThumbnail';
 import { GridColumnsMenu } from '../../common/GridColumnsMenu';
-import { useIsMobile } from '../../../hooks/useIsMobile';
+import { useIsPhone } from '../../../hooks/useIsMobile';
 import { ReturnFlashArrow } from '../ReturnFlashArrow';
 import { EventZmsHoverPlayer } from '../EventThumbnailHoverPreview';
 import { useCurrentProfile, useProfileById } from '../../../hooks/useCurrentProfile';
@@ -39,6 +43,8 @@ import { useReturnHighlightStore } from '../../../stores/returnHighlight';
 import { useReturnFlash } from '../../../hooks/useReturnFlash';
 import { useInsomnia } from '../../../hooks/useInsomnia';
 import { useBandwidthSettings } from '../../../hooks/useBandwidthSettings';
+import { useGridTrackResize } from '../../../hooks/useGridTrackResize';
+import { useZoomPan } from '../../../hooks/useZoomPan';
 import type { ZmsProbe } from '../../../hooks/useZmsEventProgress';
 import type { EventContextHistoryState } from '../../../stores/eventContext';
 import { resolveMinStreamingPort } from '../../../lib/monitor/multiport';
@@ -94,8 +100,9 @@ export function EventContextSequence({ open, onOpenChange, rows, profileId, moni
   const minStreamingPort = resolveMinStreamingPort(profile?.minStreamingPort, settings.forceDisableMultiPort);
   const rate = selectionSettings.hoverPreviewPlaybackRate ?? DEFAULT_HOVER_PREVIEW_PLAYBACK_RATE;
 
-  const isMobile = useIsMobile();
+  const isPhone = useIsPhone();
   const [grid, setGrid] = useState(readStoredGrid);
+  const [resizing, setResizing] = useState(false);
   const tileCount = selectionSettings.eventContextReplayTiles;
   const tiles = useMemo(() => balancedAroundAnchor(rows, tileCount), [rows, tileCount]);
   // The screen stays awake for as long as the replay is open, on top of (never
@@ -158,6 +165,9 @@ export function EventContextSequence({ open, onOpenChange, rows, profileId, moni
     gridRef.current
       ?.querySelector(`[data-testid="event-context-sequence-tile-${eventId}"]`)
       ?.scrollIntoView?.({ block, behavior: 'smooth' });
+  const rowCount = Math.ceil(tiles.length / grid);
+  const { colWeights, rowWeights, handleProps, reset: resetTileSizes } = useGridTrackResize(gridRef, grid, rowCount);
+  const rowWeightSum = rowWeights.reduce((a, b) => a + b, 0);
   const shownRef = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
     const started = tiles.find(({ event }) => playing.has(event.Id) && !shownRef.current.has(event.Id));
@@ -194,8 +204,10 @@ export function EventContextSequence({ open, onOpenChange, rows, profileId, moni
       eventContextSequence: { returnedFrom: eventId },
     };
     navigate({ pathname: location.pathname, search: location.search }, { replace: true, state });
-    // Same route the panel's list rows take (CompactEventRow).
-    navigate(profileId ? `/all/events/${profileId}/${eventId}` : `/events/${eventId}`);
+    // Same route and event list the panel's rows give it (CompactEventRow).
+    navigate(profileId ? `/all/events/${profileId}/${eventId}` : `/events/${eventId}`, {
+      state: { eventContextQueue: rows.map((r) => r.event.Id) } satisfies EventContextHistoryState,
+    });
   };
 
   return (
@@ -205,20 +217,24 @@ export function EventContextSequence({ open, onOpenChange, rows, profileId, moni
         // the app under them, so a box from the top edge put the toolbar and
         // the close button under the status bar. Insetting the box itself
         // (rather than padding it) moves the dialog's own close button too.
-        // From sm up it is the stock centred dialog again.
+        // Phones stay full screen in landscape too; on anything else (always
+        // sm and up) it is the stock centred dialog again.
         className={cn(
           'bottom-[var(--sai-bottom,0px)] left-[var(--sai-left,0px)] right-[var(--sai-right,0px)] top-[var(--sai-top,0px)]',
           'max-h-none w-auto max-w-none translate-x-0 translate-y-0 gap-1 rounded-none p-1.5',
           'data-[state=open]:slide-in-from-left-0 data-[state=open]:slide-in-from-top-0',
-          'sm:bottom-auto sm:left-[50%] sm:right-auto sm:top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[min(95vw,var(--replay-max-w))]',
-          'sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:p-2',
-          'sm:data-[state=open]:slide-in-from-left-1/2 sm:data-[state=open]:slide-in-from-top-[48%]',
+          !isPhone && [
+            'sm:bottom-auto sm:left-[50%] sm:right-auto sm:top-[50%] sm:max-h-[calc(100dvh-2rem)] sm:w-full sm:max-w-[min(95vw,var(--replay-max-w))]',
+            'sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:p-2',
+            'sm:data-[state=open]:slide-in-from-left-1/2 sm:data-[state=open]:slide-in-from-top-[48%]',
+          ],
           // Above the sticky toolbar, which would otherwise paint over it.
           '[&>[data-testid=dialog-close-button]]:z-20'
         )}
         data-testid="event-context-sequence"
         style={{
-          ['--replay-max-w' as string]: `calc((100dvh - 2rem - ${EVENT_CONTEXT.sequenceChromeRem}rem - ${grid} * ${EVENT_CONTEXT.sequenceRowLabelRem}rem) * 16 / 9)`,
+          // As wide as the rows the tiles fill can be while they fit on screen.
+          ['--replay-max-w' as string]: `calc((100dvh - 2rem - ${EVENT_CONTEXT.sequenceChromeRem}rem - ${Math.max(rowCount, 1)} * ${EVENT_CONTEXT.sequenceRowLabelRem}rem) * 16 / 9 * ${grid} / ${Math.max(rowCount, 1)})`,
         }}
       >
         {/* Only the toolbar and the tiles take space; the title and
@@ -233,7 +249,7 @@ export function EventContextSequence({ open, onOpenChange, rows, profileId, moni
             {t('events.around.sequence_replay')}
           </Button>
           <GridColumnsMenu
-            isMobile={isMobile}
+            isMobile={isPhone}
             gridCols={grid}
             title={t('events.around.sequence_grid')}
             triggerIcon={Grid2x2}
@@ -248,8 +264,21 @@ export function EventContextSequence({ open, onOpenChange, rows, profileId, moni
               storeGrid(n);
               // Layout only: the tiles and their streams stay as they are.
               setGrid(n);
+              resetTileSizes();
             }}
           />
+          <Button
+            variant={resizing ? 'default' : 'outline'}
+            size="sm"
+            className="h-7 px-2"
+            aria-pressed={resizing}
+            aria-label={t('events.around.sequence_resize')}
+            title={t('events.around.sequence_resize')}
+            onClick={() => setResizing((on) => !on)}
+            data-testid="event-context-sequence-resize-toggle"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
           {tiles.length < rows.length && (
             <span className="ml-auto min-w-0 truncate text-[11px] text-muted-foreground" data-testid="event-context-sequence-nearest">
               {t('events.around.sequence_nearest', {
@@ -259,9 +288,21 @@ export function EventContextSequence({ open, onOpenChange, rows, profileId, moni
             </span>
           )}
         </div>
-        <div ref={gridRef} className="grid gap-1" style={{ gridTemplateColumns: `repeat(${grid}, minmax(0, 1fr))` }}>
-          {tiles.map(({ event, offsetMs, isAnchor }) => {
-            const { urls, aspectRatio } = buildRowThumbnail(event, {
+        {/* A container, so the rows can size from the grid's width (cqw): a
+            row is one 16:9 tile plus its name, scaled by its drag weight. */}
+        <div style={{ containerType: 'inline-size' }}>
+        <div
+          ref={gridRef}
+          className="grid gap-1"
+          data-testid="event-context-sequence-grid-tiles"
+          style={{
+            ['--replay-row' as string]: `calc((100cqw - ${grid - 1} * 0.25rem) / ${grid} * 9 / 16 + ${EVENT_CONTEXT.sequenceRowLabelRem}rem)`,
+            gridTemplateColumns: colWeights.map((w) => `minmax(0, ${w}fr)`).join(' '),
+            gridTemplateRows: rowWeights.map((w) => `calc(var(--replay-row) * ${(rowCount * w) / rowWeightSum})`).join(' '),
+          }}
+        >
+          {tiles.map(({ event, offsetMs, isAnchor }, i) => {
+            const { urls } = buildRowThumbnail(event, {
               portalUrl: profile?.portalUrl || '',
               thumbnailChain: settings.thumbnailFallbackChain,
               token: isFresh ? accessToken ?? undefined : undefined,
@@ -275,7 +316,7 @@ export function EventContextSequence({ open, onOpenChange, rows, profileId, moni
                 offsetMs={offsetMs}
                 isAnchor={isAnchor}
                 urls={urls}
-                aspectRatio={aspectRatio}
+                resizeHandle={resizing ? (sx, sy) => handleProps(i % grid, Math.floor(i / grid), sx, sy) : undefined}
                 monitorName={monitorNames.get(event.MonitorId) ?? event.MonitorId}
                 isPlaying={playing.has(event.Id)}
                 run={run}
@@ -283,22 +324,36 @@ export function EventContextSequence({ open, onOpenChange, rows, profileId, moni
                 progressStepMs={zmsStatusInterval}
                 onProbe={(probe) => onProbe(event.Id, probe)}
                 profileId={profileId}
-                onTap={(at) => tapTile(event.Id, at)}
+                editing={resizing}
+                onTap={(at) => { if (!resizing) tapTile(event.Id, at); }}
               />
             );
           })}
+        </div>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
 
+const RESIZE_CORNERS = [
+  { sx: -1, sy: -1, corner: 'tl' },
+  { sx: 1, sy: -1, corner: 'tr' },
+  { sx: -1, sy: 1, corner: 'bl' },
+  { sx: 1, sy: 1, corner: 'br' },
+] as const;
+
 interface SequenceTileProps {
   event: Event;
   offsetMs: number;
   isAnchor: boolean;
   urls: string[];
-  aspectRatio: number;
+  /** Pointer props for the corner handle that moves the tile's left or right
+   *  edge (sx -1 or 1) and its top or bottom edge (sy -1 or 1); no handles
+   *  without it. */
+  /** Pencil pressed: the tile zooms and pans, and shows its corner handles. */
+  editing: boolean;
+  resizeHandle?: (sx: number, sy: number) => ReturnType<ReturnType<typeof useGridTrackResize>['handleProps']>;
   monitorName: string;
   isPlaying: boolean;
   /** Keys the player, so a restart gets a fresh stream even for a tile already playing. */
@@ -314,9 +369,11 @@ interface SequenceTileProps {
   onTap: (at: number) => void;
 }
 
-function SequenceTile({ event, offsetMs, isAnchor, urls, aspectRatio, monitorName, isPlaying, run, probe, progressStepMs, onProbe, profileId, onTap }: SequenceTileProps) {
+function SequenceTile({ event, offsetMs, isAnchor, urls, editing, resizeHandle, monitorName, isPlaying, run, probe, progressStepMs, onProbe, profileId, onTap }: SequenceTileProps) {
   const { t } = useTranslation();
   const flash = useReturnFlash(event.Id);
+  // Keys off: every tile has one of these, and arrows are window-wide.
+  const { ref: zoomRef, innerRef: zoomInnerRef } = useZoomPan({ enabled: editing, keyboard: false });
   return (
     <button
       type="button"
@@ -327,13 +384,14 @@ function SequenceTile({ event, offsetMs, isAnchor, urls, aspectRatio, monitorNam
       data-testid={`event-context-sequence-tile-${event.Id}`}
       data-playing={isPlaying}
       data-flash={flash}
-      className="min-w-0 rounded-sm border border-border/40 text-left hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="relative flex min-h-0 min-w-0 flex-col rounded-sm border border-border/40 text-left hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <div className="relative w-full overflow-hidden rounded-t-sm bg-black" style={{ aspectRatio: String(aspectRatio) }}>
+      <div ref={zoomRef} className="relative min-h-0 w-full flex-1 overflow-hidden rounded-t-sm bg-black">
         {/* The blinking triangle marks a playing tile, or the tile the user
             just came back from while playback is held. */}
         {(isPlaying || flash) && <ReturnFlashArrow className="top-1" />}
         <div className={cn('h-full w-full transition-opacity', !isPlaying && 'opacity-60')}>
+          <div ref={zoomInnerRef} data-testid={`event-context-sequence-zoom-${event.Id}`}>
           {isPlaying ? (
             <EventZmsHoverPlayer
               key={run}
@@ -341,12 +399,15 @@ function SequenceTile({ event, offsetMs, isAnchor, urls, aspectRatio, monitorNam
               onProbe={onProbe}
             />
           ) : (
-            <EventThumbnail urls={urls} cacheKey={event.Id} alt={event.Name} className="h-full w-full" objectFit="cover" />
+            <EventThumbnail urls={urls} cacheKey={event.Id} alt={event.Name} className="h-full w-full" objectFit="contain" />
           )}
+          </div>
         </div>
         <span
           className={cn(
-            'absolute right-0.5 top-0.5 rounded-sm px-1 text-[10px]',
+            'absolute top-0.5 rounded-sm px-1 text-[10px]',
+            // Clear of the top-right handle while the handles show.
+            resizeHandle ? 'right-4 [@media(pointer:coarse)]:right-7' : 'right-0.5',
             isAnchor ? 'bg-blue-500/80 text-white' : 'bg-black/60 text-white'
           )}
           title={t('events.around.offset_title')}
@@ -372,6 +433,25 @@ function SequenceTile({ event, offsetMs, isAnchor, urls, aspectRatio, monitorNam
         </div>
       </div>
       <div className="truncate px-1 py-0.5 text-[11px] leading-tight">{monitorName}</div>
+      {/* Corner handles while the pencil is pressed, drawn as Montage's
+          edit-mode L bracket (--edit-handle), so it is clear where a drag
+          starts. Siblings of the zoom box, so a handle drag never pans. touch-none so a drag on a phone resizes instead of
+          scrolling. Pointer-only: the layout is a view preference. */}
+      {resizeHandle && RESIZE_CORNERS.map(({ sx, sy, corner }) => (
+        <span
+          key={corner}
+          aria-hidden
+          data-testid={`event-context-sequence-resize-${event.Id}-${corner}`}
+          className={cn(
+            'absolute z-10 h-4 w-4 touch-none border-[color:var(--edit-handle)] [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7',
+            sy < 0 ? 'top-0 border-t-[3px]' : 'bottom-0 border-b-[3px]',
+            sx < 0 ? 'left-0 border-l-[3px]' : 'right-0 border-r-[3px]',
+            sy < 0 ? (sx < 0 ? 'rounded-tl-sm' : 'rounded-tr-sm') : sx < 0 ? 'rounded-bl-sm' : 'rounded-br-sm',
+            sx * sy > 0 ? 'cursor-nwse-resize' : 'cursor-nesw-resize'
+          )}
+          {...resizeHandle(sx, sy)}
+        />
+      ))}
     </button>
   );
 }

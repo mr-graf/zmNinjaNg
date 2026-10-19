@@ -9,6 +9,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
+import { CollapsibleCard } from '../ui/collapsible-card';
 import { EventProgressBar } from './EventProgressBar';
 import {
   Play,
@@ -26,7 +27,7 @@ import { httpGet } from '../../lib/http';
 import { log, LogLevel } from '../../lib/logger';
 import { getEventZmsUrl, getZmsControlUrl } from '../../lib/zm/url-builder';
 import { ZMS_COMMANDS, zmsCommandName } from '../../lib/zm/zm-constants';
-import { API_REQUEST, EVENT_SEEK_FLUSH_DELAY_MS, EVENT_PLAYBACK_RATES, ZMS_PLAYBACK_BADGE_MS, ZMS_STREAM_DEAD_POLLS, ZMS_STREAM_MAX_RESTARTS } from '../../lib/zmninja-ng-constants';
+import { API_REQUEST, EVENT_SEEK_FLUSH_DELAY_MS, EVENT_PLAYBACK_RATES, ZMS_PLAYBACK_BADGE_MS, ZMS_PLAYBACK_OPTIONS_OPEN_STORAGE_KEY, ZMS_STREAM_DEAD_POLLS, ZMS_STREAM_MAX_RESTARTS } from '../../lib/zmninja-ng-constants';
 import { sendDelayedCmdQuit, cancelPendingQuit } from '../../lib/zm/zms-quit';
 import { useZoomPan } from '../../hooks/useZoomPan';
 import { ZoomControls } from '../ui/zoom-controls';
@@ -74,6 +75,8 @@ interface ZmsEventPlayerProps {
    * ZMS chosen deliberately (a JPEG-only event, TV mode, the per-monitor force
    * setting) needs no notice, and the badge covers the picture (#340). */
   showNotice?: boolean;
+  /** Rendered between the picture and the controls, outside fullscreen. */
+  caption?: React.ReactNode;
 }
 
 export function ZmsEventPlayer({
@@ -96,6 +99,7 @@ export function ZmsEventPlayer({
   suspended = false,
   showNotice = false,
   fullscreen = false,
+  caption,
 }: ZmsEventPlayerProps) {
   const { t } = useTranslation();
   const bandwidth = useBandwidthSettings();
@@ -189,6 +193,11 @@ export function ZmsEventPlayer({
   // stream zms has dropped gets a new one.
   const [connKey, setConnKey] = useState(() => Math.floor(Math.random() * 1000000).toString());
 
+  // Mounted already covered (back from a nearby event lands under the open
+  // Nearby panel): no stream until release, so none runs behind the cover
+  // only to be replaced, unquit, when release restarts it (refs #547).
+  const [deferStart, setDeferStart] = useState(suspended);
+
   // Calculate alarm frame positions for progress bar
   const alarmFramePositions = useMemo(() => {
     const positions = [];
@@ -218,7 +227,7 @@ export function ZmsEventPlayer({
   // mid-event speed change does not recompute the URL); later speed changes go
   // through CMD_VARPLAY so the img src never changes after mount.
   const zmsUrl = useMemo(() => {
-    if (!isAccessTokenFresh) return '';
+    if (!isAccessTokenFresh || deferStart) return '';
     return getEventZmsUrl(portalUrl, eventId, {
       token,
       apiUrl,
@@ -230,7 +239,7 @@ export function ZmsEventPlayer({
       minStreamingPort,
       monitorId,
     });
-  }, [portalUrl, apiUrl, eventId, connKey, token, minStreamingPort, monitorId, isAccessTokenFresh]);
+  }, [portalUrl, apiUrl, eventId, connKey, token, minStreamingPort, monitorId, isAccessTokenFresh, deferStart]);
 
   // The stream itself is an <img> load, so it never appears in the HTTP log the
   // way commands and status queries do: without this line a stream that never
@@ -468,20 +477,31 @@ export function ZmsEventPlayer({
     setIsPlaying(true);
   }, [isPlaying, sendCommand, restartStream]);
 
-  // Pause while suspended and resume on release, but only for a stream that was
-  // running: a stream the user had paused stays paused. isPlaying and sendCommand
-  // are read, not depended on, so a normal play/pause does not re-run this.
+  // Quit while suspended rather than pause: a paused zms keeps its MJPEG
+  // response open, holding one of the browser's few connections to the server
+  // (refs #547). The <img> keeps the last frame. On release a stream that was
+  // running restarts on a fresh connkey from the frame it reached; one the user
+  // had paused stays stopped, marked dead so play starts a new stream.
+  // isPlaying and sendCommand are read, not depended on, so a normal
+  // play/pause does not re-run this.
   const resumeAfterSuspendRef = useRef(false);
   useEffect(() => {
     if (suspended) {
       resumeAfterSuspendRef.current = isPlaying;
-      if (isPlaying) {
-        sendCommand(ZMS_COMMANDS.cmdPause);
-        setIsPlaying(false);
+      setIsPlaying(false);
+      streamDeadRef.current = true;
+      if (streamStartedRef.current) {
+        streamStartedRef.current = false;
+        sendCommand(ZMS_COMMANDS.cmdQuit);
       }
+    } else if (deferStart) {
+      resumeAfterSuspendRef.current = false;
+      streamDeadRef.current = false;
+      setDeferStart(false);
+      setIsPlaying(true);
     } else if (resumeAfterSuspendRef.current) {
       resumeAfterSuspendRef.current = false;
-      sendCommand(ZMS_COMMANDS.cmdPlay);
+      restartStream();
       setIsPlaying(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -758,16 +778,22 @@ export function ZmsEventPlayer({
         )}
       </Card>
 
+      {!fullscreen && caption}
+
       {/* Playback Controls */}
-      {!fullscreen && (
+      {!fullscreen && (<>
       <Card className="p-4 space-y-4 bg-card/95 backdrop-blur">
         {transport}
         {progress}
-        {/* Speed Controls */}
-        <div className="space-y-2">
-          <label className="text-sm text-muted-foreground">
-            {t('event_detail.playback_speed')}
-          </label>
+      </Card>
+
+      {/* Speed and frame jumps fold away like the frames strip below. */}
+      <CollapsibleCard
+        data-testid="zms-options-card"
+        storageKey={ZMS_PLAYBACK_OPTIONS_OPEN_STORAGE_KEY}
+        header={<span className="text-sm font-semibold">{t('event_detail.playback_options')}</span>}
+      >
+        <div className="space-y-4">
           <div className="flex gap-2 justify-center flex-wrap">
             {speedPresets.map((preset) => (
               <Button
@@ -782,76 +808,76 @@ export function ZmsEventPlayer({
               </Button>
             ))}
           </div>
-        </div>
 
-        {/* Quick Jump Buttons */}
-        {(alarmFrameId || maxScoreFrameId) && (
-          <div className="flex gap-2 justify-center flex-wrap">
-            {alarmFrameId && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={jumpToAlarmFrame}
-                className="gap-2"
-                data-testid="zms-quick-jump-alarm-frame"
-              >
-                <AlertCircle className="h-4 w-4 text-destructive" />
-                {t('event_detail.first_alarm_frame')}
-              </Button>
-            )}
-            {maxScoreFrameId && (
-              <Button
-                variant="outline"
-                size="sm"
+          {/* Quick Jump Buttons */}
+          {(alarmFrameId || maxScoreFrameId) && (
+            <div className="flex gap-2 justify-center flex-wrap">
+              {alarmFrameId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={jumpToAlarmFrame}
+                  className="gap-2"
+                  data-testid="zms-quick-jump-alarm-frame"
+                >
+                  <AlertCircle className="h-4 w-4 text-destructive" />
+                  {t('event_detail.first_alarm_frame')}
+                </Button>
+              )}
+              {maxScoreFrameId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={jumpToMaxScoreFrame}
+                  className="gap-2"
+                  data-testid="zms-quick-jump-max-score-frame"
+                >
+                  <AlertCircle className="h-4 w-4 text-yellow-500" />
+                  {t('event_detail.max_score_frame')}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {/* Alarm Frames Info */}
+          {alarmFrames > 0 && (
+            <div className="text-center text-sm text-muted-foreground">
+              {t('event_detail.alarm_frames_count', { count: alarmFrames, total: totalFrames })}
+            </div>
+          )}
+
+          {/* Max score frame. The first alarm frame is not shown here: the
+              event frame carousel above the player already leads with it
+              (refs #272), and the quick-jump button above still seeks to it. */}
+          {maxScoreFrameId && maxScoreFrameId !== alarmFrameId && (
+            <div>
+              <h3 className="text-sm font-semibold mb-3">{t('event_detail.max_score_frame')}</h3>
+              <button
+                type="button"
+                className="cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={jumpToMaxScoreFrame}
-                className="gap-2"
-                data-testid="zms-quick-jump-max-score-frame"
+                data-testid="zms-jump-to-max-score-frame"
               >
-                <AlertCircle className="h-4 w-4 text-yellow-500" />
-                {t('event_detail.max_score_frame')}
-              </Button>
-            )}
-          </div>
-        )}
-
-        {/* Alarm Frames Info */}
-        {alarmFrames > 0 && (
-          <div className="text-center text-sm text-muted-foreground">
-            {t('event_detail.alarm_frames_count', { count: alarmFrames, total: totalFrames })}
-          </div>
-        )}
-      </Card>
-      )}
-
-      {/* Max score frame. The first alarm frame is no longer shown here: the
-          event frame carousel above the player already leads with it (refs
-          #272), and the quick-jump button above still seeks to it. */}
-      {!fullscreen && maxScoreFrameId && maxScoreFrameId !== alarmFrameId && (
-        <Card className="p-4 mt-4">
-          <h3 className="text-sm font-semibold mb-3">{t('event_detail.max_score_frame')}</h3>
-          <button
-            type="button"
-            className="cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={jumpToMaxScoreFrame}
-            data-testid="zms-jump-to-max-score-frame"
-          >
-            <img
-              src={isAccessTokenFresh ? getEventImageUrl(portalUrl, eventId, parseInt(maxScoreFrameId), {
-                token,
-                width: 120,
-                apiUrl,
-                minStreamingPort,
-                monitorId,
-              }) : undefined}
-              alt={t('event_detail.max_score_frame')}
-              className="w-30 h-20 object-cover rounded border-2 border-yellow-500"
-            />
-            <p className="text-xs text-center mt-1 text-muted-foreground">
-              {t('event_detail.frame')} {maxScoreFrameId}
-            </p>
-          </button>
-        </Card>
-      )}
+                <img
+                  src={isAccessTokenFresh ? getEventImageUrl(portalUrl, eventId, parseInt(maxScoreFrameId), {
+                    token,
+                    width: 120,
+                    apiUrl,
+                    minStreamingPort,
+                    monitorId,
+                  }) : undefined}
+                  alt={t('event_detail.max_score_frame')}
+                  className="w-30 h-20 object-cover rounded border-2 border-yellow-500"
+                />
+                <p className="text-xs text-center mt-1 text-muted-foreground">
+                  {t('event_detail.frame')} {maxScoreFrameId}
+                </p>
+              </button>
+            </div>
+          )}
+        </div>
+      </CollapsibleCard>
+      </>)}
     </div>
   );
 }

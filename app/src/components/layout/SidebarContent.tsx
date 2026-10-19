@@ -51,6 +51,7 @@ async function openHelpDocs(): Promise<void> {
   }
 }
 import { cn } from '../../lib/utils';
+import { ExitAppNavItem } from './ExitAppNavItem';
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getAppVersion, getFullVersion } from '../../lib/version';
@@ -222,6 +223,13 @@ export function SidebarContent({ onMobileClose, isCollapsed }: SidebarContentPro
             {currentProfile.name}
           </p>
         )}
+        <span
+          className={cn("block text-[10px] text-muted-foreground truncate min-w-0", isCollapsed ? "text-center" : "px-1")}
+          title={getFullVersion()}
+          data-testid="sidebar-app-version"
+        >
+          v{isCollapsed ? getAppVersion() : getFullVersion()}
+        </span>
       </div>
 
       <div className={cn("flex-1 overflow-y-auto overflow-x-hidden", isMobileDrawer ? "px-2 py-1" : "px-3 py-2")}>
@@ -408,6 +416,7 @@ export function SidebarContent({ onMobileClose, isCollapsed }: SidebarContentPro
             <HelpCircle className="h-4 w-4 transition-transform group-hover:scale-110 flex-shrink-0" />
             {!isCollapsed && <span className="truncate">{t('sidebar.help')}</span>}
           </button>
+          <ExitAppNavItem isCollapsed={isCollapsed} isMobileDrawer={isMobileDrawer} />
         </nav>
 
       <div className={cn("border-t bg-card/50 backdrop-blur-sm transition-all duration-300 mt-4", isCollapsed ? "p-2 space-y-3" : isMobileDrawer ? "px-2 py-2 space-y-1" : "px-3 py-2 space-y-1.5")}>
@@ -488,14 +497,6 @@ export function SidebarContent({ onMobileClose, isCollapsed }: SidebarContentPro
             {isCollapsed ? 'TV' : t('sidebar.tv_mode')}
           </span>
         )}
-        <span
-          className={cn("block text-[10px] pt-1 opacity-40 truncate min-w-0", isCollapsed ? "text-center" : "px-1")}
-          style={{ fontSize: '10px' }}
-          title={getFullVersion()}
-          data-testid="sidebar-app-version"
-        >
-          v{isCollapsed ? getAppVersion() : getFullVersion()}
-        </span>
       </div>
       </div>
       {showSetPin && (

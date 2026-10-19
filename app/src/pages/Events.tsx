@@ -22,8 +22,10 @@ import { useProfileStore } from '../stores/profile';
 import { useAuthSlice } from '../stores/auth';
 import { useFreshAccessToken } from '../hooks/useFreshAccessToken';
 import { useSettingsStore, ALL_GROUPS_KEY, DEFAULT_EVENT_MONTAGE_GROUP_LAYOUT } from '../stores/settings';
+import { useEventFilterPresets } from '../hooks/useEventFilterPresets';
 import { useEventFilters, ALL_TAGS_FILTER_ID } from '../hooks/useEventFilters';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { useEventPagination } from '../hooks/useEventPagination';
 import { useEventMontageGrid } from '../hooks/useEventMontageGrid';
 import { useScopedTags, useScopedEventTagMapping, type ScopedEventRef } from '../hooks/useScopedEventTags';
@@ -114,10 +116,13 @@ export default function Events() {
     activeQuickRange,
     setActiveQuickRange,
     applyFilters,
+    refreshQuickRange,
     clearFilters,
+    loadFilters,
     clearDateRange,
     activeFilterCount,
   } = useEventFilters();
+  const filterPresets = useEventFilterPresets(loadFilters);
 
   // Available tags across the scope. In All mode the offered entries are one
   // per distinct tag NAME, with the name standing in for the id, because tag
@@ -372,11 +377,15 @@ export default function Events() {
   const serverFilterHidesEverything = isAllMode && effectiveServerFilter !== null && effectiveServerFilter.length === 0;
 
   // Pull-to-refresh gesture
+  // A quick range moves up to now, which fetches through the new query key;
+  // anything else refetches as it is.
+  const refreshList = () => (refreshQuickRange() ? undefined : refetchAll());
   const pullToRefresh = usePullToRefresh({
     containerRef: parentRef,
-    onRefresh: refetchAll,
+    onRefresh: refreshList,
     enabled: true,
   });
+  useAutoRefresh(settings.eventsAutoRefreshSeconds, () => void refreshList());
 
   // Displayed events with their owning profile, so each server is asked only
   // for its own event ids and the merged map stays collision-free.
@@ -646,15 +655,32 @@ export default function Events() {
                   archivedOnly={archivedOnly}
                   onArchivedOnlyChange={setArchivedOnly}
                   startDateInput={startDateInput}
-                  onStartDateChange={setStartDateInput}
+                  onStartDateChange={(value) => {
+                    setStartDateInput(value);
+                    setActiveQuickRange(null);
+                  }}
                   endDateInput={endDateInput}
-                  onEndDateChange={setEndDateInput}
-                  onQuickRangeSelect={({ start, end }) => {
+                  onEndDateChange={(value) => {
+                    setEndDateInput(value);
+                    setActiveQuickRange(null);
+                  }}
+                  onQuickRangeSelect={({ start, end, hours }) => {
                     setStartDateInput(formatLocalDateTimeSeconds(start));
                     setEndDateInput(formatLocalDateTimeSeconds(end));
+                    setActiveQuickRange(hours);
                   }}
                   onApplyFilters={applyFilters}
-                  onClearFilters={clearFilters}
+                  onClearFilters={() => {
+                    clearFilters();
+                    filterPresets.clearActive();
+                  }}
+                  presets={{
+                    names: filterPresets.names,
+                    activeName: filterPresets.activeName,
+                    onSave: filterPresets.save,
+                    onLoad: filterPresets.load,
+                    onDelete: filterPresets.remove,
+                  }}
                   tagsSupported={tagsSupported}
                   availableTags={availableTags}
                   selectedTagIds={selectedTagIds}

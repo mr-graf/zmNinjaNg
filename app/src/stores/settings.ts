@@ -1,3 +1,4 @@
+import { clampAutoRefreshSeconds } from '../lib/event/auto-refresh';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Layout, Layouts } from 'react-grid-layout';
@@ -151,6 +152,11 @@ export const DEFAULT_EVENT_MONTAGE_GROUP_LAYOUT: EventMontageGroupLayout = {
 /** Events list treatment of ZoneMinder's linked recordings (refs #493). */
 export type LinkedEventFilter = 'all' | 'only' | 'hide';
 
+export interface EventFilterPreset {
+  name: string;
+  filters: ProfileSettings['eventsPageFilters'];
+}
+
 export interface ProfileSettings {
   viewMode: ViewMode;
   /**
@@ -167,6 +173,8 @@ export interface ProfileSettings {
   streamMaxFps: number; // Max FPS for live streams
   streamScale: number; // Scale percentage for live streams (1-100)
   defaultEventLimit: number; // Default number of events to fetch when no filters applied
+  /** Events and Timeline refetch every this many seconds; 0 is off. */
+  eventsAutoRefreshSeconds: number;
   /** Number of recent events shown under the live view on the monitor detail page. */
   monitorDetailRecentEventsCount: number;
   /** Monitor IDs whose recent-events list is collapsed/hidden on the detail page. */
@@ -291,6 +299,10 @@ export interface ProfileSettings {
      *  this object is spread rather than deep-merged. */
     linkedFilter: LinkedEventFilter;
   };
+  /** Named snapshots of `eventsPageFilters` (refs #544). */
+  eventFilterPresets: EventFilterPreset[];
+  /** Name of the preset last loaded or saved, '' when none is. */
+  activeEventFilterPreset: string;
   disableLogRedaction: boolean;
   lastRoute: string; // Last visited route for this profile
   // Screen the app opens on for this profile: a path from START_SCREENS, or
@@ -487,6 +499,7 @@ export const DEFAULT_SETTINGS: ProfileSettings = {
   streamMaxFps: 10,
   streamScale: 50,
   defaultEventLimit: 100,
+  eventsAutoRefreshSeconds: 0,
   monitorDetailRecentEventsCount: 20,
   monitorDetailRecentEventsHidden: [],
   montageByGroup: {},
@@ -544,6 +557,8 @@ export const DEFAULT_SETTINGS: ProfileSettings = {
     activeQuickRange: null,
     linkedFilter: 'all',
   },
+  eventFilterPresets: [],
+  activeEventFilterPreset: '',
   disableLogRedaction: false,
   lastRoute: '/monitors',
   startScreen: START_SCREEN_LAST_USED,
@@ -667,6 +682,7 @@ export function mergeProfileSettings(raw: Partial<ProfileSettings> | undefined):
   if (!(EVENT_CONTEXT.replayTileChoices as readonly unknown[]).includes(merged.eventContextReplayTiles)) {
     merged.eventContextReplayTiles = DEFAULT_SETTINGS.eventContextReplayTiles;
   }
+  merged.eventsAutoRefreshSeconds = clampAutoRefreshSeconds(merged.eventsAutoRefreshSeconds);
   coerceAllModePerformance(merged, DEFAULT_SETTINGS);
   coerceEventContext(merged, DEFAULT_SETTINGS);
   return merged;

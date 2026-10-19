@@ -36,7 +36,8 @@ import { ZmsEventPlayer } from '../components/events/ZmsEventPlayer';
 import { EventFrameCarousel } from '../components/events/EventFrameCarousel';
 import { TagChip } from '../components/events/TagChip';
 import { EventContextButton } from '../components/events/context/EventContextButton';
-import { ArrowLeft, Calendar, Clock, HardDrive, AlertTriangle, Download, Archive, ArchiveRestore, Video, Star, Timer, Tag, ChevronLeft, ChevronRight, ChevronsUpDown, Loader2, ListVideo } from 'lucide-react';
+import type { EventContextHistoryState } from '../stores/eventContext';
+import { ArrowLeft, Clock, HardDrive, AlertTriangle, Download, Archive, ArchiveRestore, Video, Star, Tag, ChevronLeft, ChevronRight, ChevronsUpDown, Loader2, ListVideo } from 'lucide-react';
 import { getEventCauseIcon } from '../lib/event/event-icons';
 import { getObjectClassIconFromList } from '../lib/event/object-class-icons';
 import { useDateTimeFormat } from '../hooks/useDateTimeFormat';
@@ -59,6 +60,7 @@ import { ErrorBanner, DetailPageSkeleton } from '../components/ui/query-state';
 import { useEventNavigation } from '../hooks/useEventNavigation';
 import { useServerUrls } from '../hooks/useServerUrls';
 import { cn } from '../lib/utils';
+import { formatCompactDuration } from '../lib/format-date-time';
 import { formatEventRelative } from '../lib/relative-time';
 import { CONTINUOUS_PLAYBACK_TOAST_DURATION_MS } from '../lib/zmninja-ng-constants';
 
@@ -88,7 +90,7 @@ export default function EventDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t, i18n } = useTranslation();
-  const { fmtDate, fmtTime, fmtDateTime } = useDateTimeFormat();
+  const { fmtDateTime } = useDateTimeFormat();
   const { isTvMode } = useTvMode();
 
   // Check if user came from another page (navigation state tracking)
@@ -194,19 +196,24 @@ export default function EventDetail() {
     landscape: selectionSettings.landscapeFullscreen,
   });
 
+  // The Nearby panel is a history entry over this page (refs #494). An event
+  // ending behind it must not advance: that navigation drops the panel's entry
+  // and closes it under the user (refs #547).
+  const contextPanelOpen = Boolean((location.state as EventContextHistoryState | null)?.eventContextAnchor);
+
   // Guards against a stray second 'ended' (video.js can emit it during teardown)
   // triggering a double advance. Re-armed for each event by the id-change effect.
   const advancingRef = useRef(false);
   useEffect(() => { advancingRef.current = false; }, [id]);
   const handleVideoEnded = useCallback(async () => {
-    if (!continuousPlay || advancingRef.current) return;
+    if (!continuousPlay || contextPanelOpen || advancingRef.current) return;
     advancingRef.current = true;
     const advanced = await goToNextEvent({ continuousPlayback: true });
     if (!advanced) {
       advancingRef.current = false;
       toast.info(t('event_detail.no_more_videos'));
     }
-  }, [continuousPlay, goToNextEvent, t]);
+  }, [continuousPlay, contextPanelOpen, goToNextEvent, t]);
 
   const announcedContinuousEventRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -369,6 +376,22 @@ export default function EventDetail() {
     }
   }, []);
 
+  // The Nearby panel covers the player the same way (refs #547). The players
+  // remount per event, so a resume pending from the last event is dropped
+  // before this runs for the next one. ZMS gets the panel through `suspended`.
+  const resumeAfterPanelRef = useRef(false);
+  useEffect(() => { resumeAfterPanelRef.current = false; }, [id]);
+  useEffect(() => {
+    const player = mp4PlayerRef.current;
+    if (contextPanelOpen) {
+      resumeAfterPanelRef.current = !!player && !player.paused();
+      player?.pause();
+    } else if (resumeAfterPanelRef.current) {
+      resumeAfterPanelRef.current = false;
+      void player?.play();
+    }
+  }, [contextPanelOpen]);
+
   const orientedResolution = useMemo(
     () => getOrientedResolution(
       event?.Event.Width ?? monitorData?.Monitor.Width,
@@ -492,6 +515,27 @@ export default function EventDetail() {
   }
 
   const startTime = new Date(event.Event.StartDateTime.replace(' ', 'T'));
+  // Sits right under the picture: the ZMS player places it above its own
+  // controls, every other branch renders it below the media card. The
+  // important margins beat the parents' space-y gaps, which would otherwise
+  // leave a full gap on both sides of one line of text.
+  const zmsShown = hasVideo ? playThroughZms : hasJPEGs;
+  const startCaption = (
+    <div
+      className="!mt-1 !-mb-2 flex items-center justify-center gap-2 min-w-0 text-xs text-muted-foreground"
+      data-testid="event-detail-start"
+    >
+      <span className="min-w-0 truncate">
+        {fmtDateTime(startTime)} ({formatCompactDuration(Number(event.Event.Length))})
+      </span>
+      <EventContextButton
+        event={event.Event}
+        profileId={routeProfileId}
+        labelled
+        className="w-auto shrink-0 gap-1 px-2 py-0.5 text-xs"
+      />
+    </div>
+  );
   const incomingSlide = location.state?.slideDirection as 'left' | 'right' | undefined;
 
   // The page itself goes fullscreen the way Monitor Detail does: header gone,
@@ -689,7 +733,7 @@ export default function EventDetail() {
                   eventId={event.Event.Id}
                   profileId={ownerProfileId}
                   token={isAccessTokenFresh ? accessToken ?? undefined : undefined}
-                  suspended={frameViewerOpen}
+                  suspended={frameViewerOpen || contextPanelOpen}
                   apiUrl={ownerProfile.apiUrl}
                   totalFrames={parseInt(event.Event.Frames)}
                   alarmFrames={parseInt(event.Event.AlarmFrames)}
@@ -704,6 +748,7 @@ export default function EventDetail() {
                   onRateChange={handleRateChange}
                   className="space-y-4"
                   fullscreen={pageFullscreen}
+                  caption={startCaption}
                 />
               )
             ) : (
@@ -729,7 +774,14 @@ export default function EventDetail() {
                         markers={videoMarkers}
                         onMarkerClick={handleMarkerClick}
                         eventId={event.Event.Id}
-                        onReady={(player) => { mp4PlayerRef.current = player; }}
+                        onReady={(player) => {
+                          mp4PlayerRef.current = player;
+                          // Unmount (ZMS fallback, a ZMS next event) disposes the
+                          // player; a disposed one throws on paused() (refs #547).
+                          player.on('dispose', () => {
+                            if (mp4PlayerRef.current === player) mp4PlayerRef.current = null;
+                          });
+                        }}
                         onError={handleVideoError}
                         onEnded={handleVideoEnded}
                         playbackRate={settings.eventPlaybackRate}
@@ -757,7 +809,7 @@ export default function EventDetail() {
                 eventId={event.Event.Id}
                 profileId={ownerProfileId}
                 token={accessToken || undefined}
-                suspended={frameViewerOpen}
+                suspended={frameViewerOpen || contextPanelOpen}
                 apiUrl={ownerProfile.apiUrl}
                 totalFrames={parseInt(event.Event.Frames)}
                 alarmFrames={parseInt(event.Event.AlarmFrames)}
@@ -771,6 +823,7 @@ export default function EventDetail() {
                 onRateChange={handleRateChange}
                 className="space-y-4"
                 fullscreen={pageFullscreen}
+                caption={startCaption}
               />
             )
           ) : (
@@ -791,6 +844,8 @@ export default function EventDetail() {
               metadata cards would put content below the fold behind the
               overflow-hidden scroller (refs #462). */}
           {!pageFullscreen && (<>
+          {!zmsShown && startCaption}
+
           {/* Significant frames for this event (#272). Sits between the player
               and the metadata so the frames read as a detail of what is on
               screen above, rather than pushing the player itself below the
@@ -810,41 +865,25 @@ export default function EventDetail() {
           )}
 
           {/* Metadata Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="p-6 space-y-4">
-              <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">{t('event_detail.timing')}</h3>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <Calendar className="h-5 w-5 text-primary" />
-                  <div>
-                    <div className="text-sm font-medium">{t('event_detail.date')}</div>
-                    <div className="text-sm text-muted-foreground">{fmtDate(startTime)}</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Clock className="h-5 w-5 text-primary" />
-                  <div>
-                    <div className="text-sm font-medium">{t('event_detail.time')}</div>
-                    <div className="text-sm text-muted-foreground">{fmtTime(startTime)}</div>
-                    <div className="text-xs text-muted-foreground/70" data-testid="event-detail-relative-time">
-                      {formatEventRelative(startTime, i18n.language, t)}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Timer className="h-5 w-5 text-primary" />
-                  <div>
-                    <div className="text-sm font-medium">{t('event_detail.duration')}</div>
-                    <div className="text-sm text-muted-foreground">{event.Event.Length} {t('event_detail.seconds')}</div>
-                  </div>
-                </div>
-              </div>
-              <EventContextButton event={event.Event} profileId={routeProfileId} labelled />
-            </Card>
-
-            <Card className="p-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="p-6 space-y-4" data-testid="event-detail-details">
               <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">{t('event_detail.details')}</h3>
               <div className="space-y-3">
+                {detectedClassInfo && (
+                  <div className="flex justify-between items-center py-1 border-b border-border/50" data-testid="event-detail-detected-row">
+                    <span className="text-sm text-muted-foreground">{t('event_detail.detected')}</span>
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                      <detectedClassInfo.DetectIcon className="h-3.5 w-3.5 shrink-0" />
+                      {detectedClassInfo.classList}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between py-1 border-b border-border/50" data-testid="event-detail-time-row">
+                  <span className="text-sm text-muted-foreground">{t('event_detail.time')}</span>
+                  <span className="text-sm font-medium" data-testid="event-detail-relative-time">
+                    {formatEventRelative(startTime, i18n.language, t)}
+                  </span>
+                </div>
                 <div className="flex justify-between py-1 border-b border-border/50">
                   <span className="text-sm text-muted-foreground">{t('event_detail.event_id')}</span>
                   <span className="text-sm font-medium">{event.Event.Id}</span>
@@ -857,15 +896,6 @@ export default function EventDetail() {
                   <span className="text-sm text-muted-foreground">{t('event_detail.score')}</span>
                   <span className="text-sm font-medium">{event.Event.AvgScore} / {event.Event.MaxScore}</span>
                 </div>
-                {detectedClassInfo && (
-                  <div className="flex justify-between items-center py-1 border-b border-border/50" data-testid="event-detail-detected-row">
-                    <span className="text-sm text-muted-foreground">{t('event_detail.detected')}</span>
-                    <span className="flex items-center gap-1.5 text-sm font-medium">
-                      <detectedClassInfo.DetectIcon className="h-3.5 w-3.5 shrink-0" />
-                      {detectedClassInfo.classList}
-                    </span>
-                  </div>
-                )}
                 <div className="flex justify-between py-1 border-b border-border/50">
                   <span className="text-sm text-muted-foreground">{t('event_detail.resolution')}</span>
                   <span className="text-sm font-medium">{orientedResolution}</span>

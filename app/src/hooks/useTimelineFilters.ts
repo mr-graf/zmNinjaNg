@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useCurrentProfile } from './useCurrentProfile';
 import { useProfileStore } from '../stores/profile';
 import { useSettingsStore } from '../stores/settings';
+import { formatLocalDateTime, withFreshQuickRange } from '../lib/time';
 
 export interface UseTimelineFiltersReturn {
   selectedMonitorIds: string[];
@@ -24,6 +25,8 @@ export interface UseTimelineFiltersReturn {
   setOnlyDetectedObjects: (enabled: boolean) => void;
   setCauseFilter: (cause: string) => void;
   setActiveQuickRange: (hours: number | null) => void;
+  /** Move an active quick range's window up to now; false when nothing moved. */
+  refreshQuickRange: () => boolean;
   clearFilters: () => void;
   activeFilterCount: number;
 }
@@ -91,9 +94,11 @@ export function useTimelineFilters(): UseTimelineFiltersReturn {
   const prevSettingsRef = useRef<string>('');
   useEffect(() => {
     if (!currentProfileId) return;
-    const saved = settings.timelinePageFilters;
-    const settingsKey = JSON.stringify(saved);
+    const persisted = settings.timelinePageFilters;
+    const settingsKey = JSON.stringify(persisted);
     if (settingsKey === prevSettingsRef.current) return;
+    // Only the mount restore re-anchors: later runs echo what the user just set.
+    const saved = prevSettingsRef.current === '' ? withFreshQuickRange(persisted, formatLocalDateTime) : persisted;
     prevSettingsRef.current = settingsKey;
 
     _setMonitorIds(saved.monitorIds);
@@ -103,6 +108,19 @@ export function useTimelineFilters(): UseTimelineFiltersReturn {
     _setCauseFilter(saved.causeFilter ?? '');
     _setActiveQuickRange(saved.activeQuickRange ?? null);
   }, [currentProfileId, settings.timelinePageFilters]);
+
+  // Auto-refresh on "past 8 hours" means the past 8 hours from now. A new range
+  // changes the query key, which fetches it; on false the caller refetches.
+  const refreshQuickRange = useCallback((): boolean => {
+    const { startDateTime, endDateTime } = withFreshQuickRange(
+      { startDateTime: startDateInput, endDateTime: endDateInput, activeQuickRange },
+      formatLocalDateTime,
+    );
+    if (startDateTime === startDateInput && endDateTime === endDateInput) return false;
+    setStartDateInput(startDateTime);
+    setEndDateInput(endDateTime);
+    return true;
+  }, [startDateInput, endDateInput, activeQuickRange, setStartDateInput, setEndDateInput]);
 
   const clearFilters = useCallback(() => {
     setSelectedMonitorIds([]);
@@ -123,6 +141,6 @@ export function useTimelineFilters(): UseTimelineFiltersReturn {
   return {
     selectedMonitorIds, startDateInput, endDateInput, onlyDetectedObjects, causeFilter, activeQuickRange,
     setSelectedMonitorIds, setStartDateInput, setEndDateInput, setOnlyDetectedObjects, setCauseFilter, setActiveQuickRange,
-    clearFilters, activeFilterCount,
+    refreshQuickRange, clearFilters, activeFilterCount,
   };
 }

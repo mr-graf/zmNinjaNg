@@ -95,6 +95,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
   localStorage.clear();
   useReturnHighlightStore.getState().clear();
@@ -247,6 +248,47 @@ describe('EventContextSequence', () => {
     expect(screen.getByTestId('path')).toHaveTextContent('/all/events/p1/b');
   });
 
+  it('opens the event with the nearby events in order (refs #547)', () => {
+    function State() {
+      const state = useLocation().state as { eventContextQueue?: string[] } | null;
+      return <div data-testid="queue">{state?.eventContextQueue?.join(',')}</div>;
+    }
+    render(
+      <MemoryRouter>
+        <EventContextSequence open onOpenChange={() => {}} rows={rows} profileId={P} monitorNames={new Map()} />
+        <State />
+      </MemoryRouter>
+    );
+    const tile = screen.getByTestId('event-context-sequence-tile-b');
+    fireEvent.click(tile);
+    act(() => vi.advanceTimersByTime(100));
+    fireEvent.click(tile);
+    expect(screen.getByTestId('queue')).toHaveTextContent('a,b,c');
+  });
+
+  it('ignores taps while the pencil is pressed, so a pan is not a play or an open', () => {
+    function Path() {
+      return <div data-testid="path">{useLocation().pathname}</div>;
+    }
+    render(
+      <MemoryRouter>
+        <EventContextSequence open onOpenChange={() => {}} rows={rows} profileId={P} monitorNames={new Map()} />
+        <Path />
+      </MemoryRouter>
+    );
+    act(() => vi.advanceTimersByTime(0));
+    const before = playingIds();
+    fireEvent.click(screen.getByTestId('event-context-sequence-resize-toggle'));
+    const tile = screen.getByTestId('event-context-sequence-tile-b');
+    fireEvent.click(tile);
+    act(() => vi.advanceTimersByTime(100));
+    fireEvent.click(tile);
+    act(() => vi.advanceTimersByTime(0));
+    expect(screen.getByTestId('path')).toHaveTextContent(/^\/$/);
+    expect(playingIds()).toEqual(before);
+    expect(before).not.toEqual(['b']);
+  });
+
   it('treats two taps far apart as two plays, not an open', () => {
     function Path() {
       return <div data-testid="path">{useLocation().pathname}</div>;
@@ -281,20 +323,107 @@ describe('EventContextSequence', () => {
     const { unmount } = render(view());
     const nearest = tileIds();
     expect(nearest).toHaveLength(12);
-    expect(columns()).toBe('repeat(3, minmax(0, 1fr))');
+    expect(columns()).toBe(Array(3).fill('minmax(0, 1fr)').join(' '));
 
     await user.click(screen.getByTestId('event-context-sequence-grid'));
     await user.click(screen.getByTestId('event-context-sequence-grid-2'));
     expect(tileIds()).toEqual(nearest);
-    expect(columns()).toBe('repeat(2, minmax(0, 1fr))');
+    expect(columns()).toBe(Array(2).fill('minmax(0, 1fr)').join(' '));
     unmount();
 
     render(view());
-    expect(columns()).toBe('repeat(2, minmax(0, 1fr))');
+    expect(columns()).toBe(Array(2).fill('minmax(0, 1fr)').join(' '));
     await user.click(screen.getByTestId('event-context-sequence-grid'));
     await user.click(screen.getByTestId('event-context-sequence-grid-4'));
     expect(tileIds()).toEqual(nearest);
-    expect(columns()).toBe('repeat(4, minmax(0, 1fr))');
+    expect(columns()).toBe(Array(4).fill('minmax(0, 1fr)').join(' '));
+  });
+
+  it('sizes the dialog to the rows the tiles fill, not to a full N x N grid', () => {
+    // Three tiles in the default 3-column grid fill one row, so the height
+    // budget is one row's, stretched over three columns.
+    renderGrid();
+    expect(screen.getByTestId('event-context-sequence').style.getPropertyValue('--replay-max-w')).toBe(
+      'calc((100dvh - 2rem - 3rem - 1 * 1.25rem) * 16 / 9 * 3 / 1)'
+    );
+  });
+
+  it.each([
+    [true, 'fills the screen and picks the grid from a sheet on a phone, in either orientation'],
+    [false, 'is a centred box with a grid dropdown on a tablet or computer'],
+  ])('%s: %s', async (phone) => {
+    vi.useRealTimers();
+    // jsdom has no matchMedia; which screens count as a phone is useIsMobile.test's job.
+    vi.stubGlobal('matchMedia', () => ({ matches: phone, addEventListener: () => {}, removeEventListener: () => {} }));
+    const user = userEvent.setup();
+    renderGrid();
+    expect(screen.getByTestId('event-context-sequence').className.includes('sm:top-[50%]')).toBe(!phone);
+    await user.click(screen.getByTestId('event-context-sequence-grid'));
+    // The sheet lists the sizes as pressable buttons, the dropdown as menu items.
+    expect(screen.getByTestId('event-context-sequence-grid-3').getAttribute('role')).toBe(phone ? null : 'menuitem');
+  });
+
+  it('shows the corner handles only while the pencil is pressed', async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <EventContextSequence open onOpenChange={() => {}} rows={[row('a', 0, 10), row('b', 1_000, 10)]} profileId={P} monitorNames={new Map()} />
+      </MemoryRouter>
+    );
+    const toggle = screen.getByTestId('event-context-sequence-resize-toggle');
+    expect(screen.queryAllByTestId(/^event-context-sequence-resize-a-/)).toHaveLength(0);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(toggle);
+    expect(screen.queryAllByTestId(/^event-context-sequence-resize-a-/).map((el) => el.dataset.testid)).toEqual(
+      ['tl', 'tr', 'bl', 'br'].map((c) => `event-context-sequence-resize-a-${c}`)
+    );
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(toggle);
+    expect(screen.queryAllByTestId(/^event-context-sequence-resize-a-/)).toHaveLength(0);
+  });
+
+  it('starts every tile the same size again whenever a grid size is picked', async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    // jsdom has no layout: give the grid and tiles real sizes, and pointer capture.
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(900);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 300, height: 200 } as DOMRect);
+    HTMLElement.prototype.setPointerCapture = () => {};
+    const many = Array.from({ length: 12 }, (_, i) => row(`e${i}`, (i - 6) * 1_000, 10));
+    render(
+      <MemoryRouter>
+        <EventContextSequence open onOpenChange={() => {}} rows={many} profileId={P} monitorNames={new Map()} />
+      </MemoryRouter>
+    );
+    const columns = () => screen.getByTestId('event-context-sequence-grid-tiles').style.gridTemplateColumns;
+    const even = (n: number) => Array(n).fill('minmax(0, 1fr)').join(' ');
+    const pick = async (n: number) => {
+      await user.click(screen.getByTestId('event-context-sequence-grid'));
+      await user.click(screen.getByTestId(`event-context-sequence-grid-${n}`));
+    };
+    await pick(3);
+    await user.click(screen.getByTestId('event-context-sequence-resize-toggle'));
+    const handle = screen.getByTestId('event-context-sequence-resize-e0-br');
+    fireEvent.pointerDown(handle, { clientX: 300, clientY: 200, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 500, clientY: 300, pointerId: 1 });
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    expect(columns()).not.toBe(even(3));
+
+    await pick(3);
+    expect(columns()).toBe(even(3));
+
+    fireEvent.pointerDown(handle, { clientX: 300, clientY: 200, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 500, clientY: 300, pointerId: 1 });
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    await pick(2);
+    await pick(3);
+    expect(columns()).toBe(even(3));
+    vi.restoreAllMocks();
+    delete (HTMLElement.prototype as Partial<HTMLElement>).setPointerCapture;
   });
 
   it('keeps the playing stream going when the grid size changes', async () => {

@@ -3282,8 +3282,8 @@ third should ask for.
        ZM-->>Hook: monitors (LinkedMonitors column), groups
        Hook->>ZM: GET events.json, StartDateTime within ±window, MonitorId filter from scope
        ZM-->>Hook: events in the window
-       Hook-->>Body: rows (offset from anchor), ribbon lanes, truncated, error
-       Body-->>User: controls, ribbon, and rows rendered in the sheet
+       Hook-->>Body: rows (offset from anchor), truncated, error
+       Body-->>User: controls and rows rendered in the sheet
        User->>Panel: Escape, backdrop, close button, or Android back
        Panel->>Router: navigate(-1)
        Router-->>Panel: location.state no longer carries the anchor, unmounts
@@ -3404,18 +3404,6 @@ third should ask for.
    `source <https://github.com/ZoneMinder/zmNinjaNg/blob/main/app/src/hooks/useEventsAround.ts>`__
    · → :doc:`07-api-and-data-fetching`
 
-#. **The ribbon and the list are two views over the same rows, and the ribbon
-   collapses.** ``buildRibbonLanes`` groups rows by ``MonitorId`` into one lane
-   per monitor and positions each dot 0-100% across the window from its
-   offset; it renders nothing for a single lane, since one monitor's dots say
-   nothing the list below does not. Tapping a dot scrolls that event's row
-   into view in the list below and marks it viewed through the
-   return-highlight store. A header row above the lanes toggles them
-   collapsed, showing the lane count instead; the choice persists per device
-   in ``localStorage`` under ``STORAGE_KEYS.eventContextRibbonOpen``.
-   `source <https://github.com/ZoneMinder/zmNinjaNg/blob/main/app/src/components/events/context/EventContextRibbon.tsx>`__
-   · → :doc:`05-component-architecture`
-
 #. **Replay plays the rows around the anchor, one run at a time.** The Replay
    button, enabled from two rows up, opens ``EventContextSequence`` in a
    dialog. Its code and locale keys still use the working name "sequence". It
@@ -3423,7 +3411,7 @@ third should ask for.
    selection-scoped setting, one of ``EVENT_CONTEXT.replayTileChoices``); the
    N x N size picked in its ``GridColumnsMenu`` (stored per device under
    ``STORAGE_KEYS.eventContextReplayGrid``) only sets N columns and a width
-   at which N rows fit the screen. It hands the tiles to ``buildReplayRuns``,
+   at which the rows the tiles fill (at most N) fit the screen. It hands the tiles to ``buildReplayRuns``,
    which groups events that overlap in time into runs and gives each tile a
    start offset inside its run, divided by
    ``hoverPreviewPlaybackRate``. ``EventZmsHoverPlayer`` reads the same setting
@@ -3455,6 +3443,25 @@ third should ask for.
    with ``{ returnedFrom: eventId }`` and then navigates to its event, so back
    remounts the dialog with playback held and ``useReturnFlash`` blinking that
    tile, the same hook the Events list uses for a returned-to row.
+   While the toolbar's pencil is pressed, each tile has four corner handles.
+   ``useGridTrackResize`` keeps
+   one ``fr`` weight per column and per row; a drag captures the pointer and,
+   on each move, ``resizeTrack`` sets the dragged column's and row's weight so
+   that track takes the size the pointer asks for, with the other tracks
+   keeping their proportions and none dropping below
+   ``EVENT_CONTEXT.sequenceMinTrackShare``. Rows are sized from the grid's
+   width through a ``cqw`` container unit, so the grid's total size never
+   changes. The handle stops its click from reaching the tile, so a drag is
+   not a tap. Nothing remounts, so playing streams carry on. Each handle draws
+   Montage's edit-mode L bracket in ``--edit-handle`` (``index.css``). Each
+   tile also runs ``useZoomPan`` with ``enabled`` following the pencil and
+   ``keyboard: false``, since window-wide arrow keys would pan every zoomed
+   tile at once. The handles are siblings of the zoom box, so a handle drag
+   never pans. While the pencil is pressed a tile tap does nothing, so the
+   click that ends a pan does not restart the replay. Releasing the pencil
+   turns the gestures off but leaves the transform applied. Picking a grid size
+   calls the hook's ``reset``; a change in the column or row count also
+   resets the weights.
    `source <https://github.com/ZoneMinder/zmNinjaNg/blob/main/app/src/components/events/context/EventContextSequence.tsx>`__
    · → :doc:`05-component-architecture`
 
@@ -3464,6 +3471,18 @@ forward over the panel's own history entry, which is what closes it. Back
 from that event returns to the panel's entry and reopens it on the same
 anchor, with the window and scope it already had - those come back from the
 anchor profile's own settings, not from anything the history entry carries.
+
+The opened event's own entry does carry the panel's rows: the list passes
+``openState`` to ``CompactEventRow`` and a Replay tile passes the same state,
+``eventContextQueue``, the row ids in time order. With continuous play on,
+``goToNextEvent({ continuousPlayback: true })`` in ``useEventNavigation`` finds
+the current id in that list and navigates to the one after it instead of asking
+the server for the next filtered event, carrying the list forward and marking
+the new event viewed so back flashes its row. Past the last id it resolves
+``false`` and the page shows "no more videos". While the panel is open over
+``EventDetail``, the page pauses the MP4 player, passes ``suspended`` to the ZMS
+player, and ignores ``onEnded``, so an event cannot finish behind the sheet and
+navigate it away (refs #547).
 
 When you need to change something, find the nearest flow, open its ``source`` link to land on the exact
 code, and follow the ``→`` link for the chapter that explains that layer.
