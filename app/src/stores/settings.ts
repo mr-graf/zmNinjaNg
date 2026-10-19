@@ -117,7 +117,16 @@ export interface MontageGroupLayout {
   activeLayoutName: string | null;
   gridCols: number;
   hiddenMonitorIds: string[];
+  /** Active template id, or null for the normal free-form layout. While a
+   *  template is active, workingLayout is ignored and templateSlots drives
+   *  the grid instead. The free-form layout is kept as-is, so switching the
+   *  template off returns to it unchanged. */
+  activeTemplate: string | null;
+  /** Slot id -> monitor id. Absent keys are empty slots. Slot ids come from
+   *  the template (see templates.ts): 'big', 'right-0', 'bottom-2'. */
+  templateSlots: Record<string, string>;
 }
+
 
 /** Per-group event montage state. Event montage is a uniform grid, so only the
  * column count needs scoping. */
@@ -131,6 +140,8 @@ export const DEFAULT_MONTAGE_GROUP_LAYOUT: MontageGroupLayout = {
   activeLayoutName: null,
   gridCols: 2,
   hiddenMonitorIds: [],
+  activeTemplate: null,
+  templateSlots: {},
 };
 
 export const DEFAULT_EVENT_MONTAGE_GROUP_LAYOUT: EventMontageGroupLayout = {
@@ -668,7 +679,41 @@ export function mergeProfileSettings(raw: Partial<ProfileSettings> | undefined):
  * number, so a change added without a bump never reaches anyone who already
  * ran the app.
  */
-export const SETTINGS_VERSION = 12;
+export const SETTINGS_VERSION = 13;
+
+
+/** Fills the template keys added to every montage bucket after a profile was
+ *  last written. A bucket persisted before these existed has neither key, and
+ *  the merge in updateMontageGroupLayout spreads defaults only for keys the
+ *  bucket already carries, so reading `activeTemplate` off an old bucket would
+ *  give undefined. Done here rather than in mergeProfileSettings for the same
+ *  reason as fillHoverPreviewSurfaces: a per-read rebuild would hand every
+ *  useShallow reader a fresh identity. */
+function fillMontageTemplateKeys(persistedState: unknown): unknown {
+  const state = (persistedState ?? {}) as { profileSettings?: Record<string, unknown> };
+  if (!state.profileSettings) return persistedState;
+
+  const migrated: Record<string, unknown> = {};
+  for (const [profileId, raw] of Object.entries(state.profileSettings)) {
+    const s = (raw ?? {}) as Record<string, unknown>;
+    const montageByGroup = s.montageByGroup as Record<string, Record<string, unknown>> | undefined;
+    if (!montageByGroup) {
+      migrated[profileId] = s;
+      continue;
+    }
+    const patchedGroups: Record<string, unknown> = {};
+    for (const [groupKey, bucket] of Object.entries(montageByGroup)) {
+      patchedGroups[groupKey] = {
+        activeTemplate: null,
+        templateSlots: {},
+        ...bucket,
+      };
+    }
+    migrated[profileId] = { ...s, montageByGroup: patchedGroups };
+  }
+  return { ...state, profileSettings: migrated };
+}
+
 
 /**
  * Migrate persisted settings:
@@ -681,12 +726,16 @@ export const SETTINGS_VERSION = 12;
  * runs for every version below `SETTINGS_VERSION`, so each new retirement
  * reaches stores that already migrated for an earlier one.
  */
+
 export function migrateSettings(persistedState: unknown, version: number): unknown {
   const state = version >= 1 ? persistedState : migrateV0ToV1(persistedState);
-  return moveNativeOffOnDevice(
-    fillEventContextKeys(fillHoverPreviewSurfaces(normalizeRetiredModelIds(state)))
+  return fillMontageTemplateKeys(
+    moveNativeOffOnDevice(
+      fillEventContextKeys(fillHoverPreviewSurfaces(normalizeRetiredModelIds(state)))
+    )
   );
 }
+
 
 /** Fills `eventContext` keys added after a profile was last written, so a
  *  later addition starts at its default instead of the merge repairing it on

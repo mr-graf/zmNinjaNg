@@ -138,9 +138,21 @@ export default function Montage() {
   // Edit mode state lifted to page level.
   const [isEditMode, setIsEditMode] = useState(false);
 
-  // DRAFT: active template id (null = normal free-form mode).
-  // Local state only for now; will move into settings when the feature lands.
-  const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
+  // Template state now lives in the group's montage bucket, so it survives a
+  // restart and is scoped to the profile and group like every other montage
+  // preference. `bucket` comes from useMontageGroupState.
+  const activeTemplate = bucket.activeTemplate ?? null;
+  const templateSlots = bucket.templateSlots ?? {};
+
+  const setActiveTemplate = useCallback((next: string | null) => {
+    updateGroupLayout({ activeTemplate: next });
+  }, [updateGroupLayout]);
+
+  const setTemplateSlots = useCallback((next: Record<string, string>) => {
+    updateGroupLayout({ templateSlots: next });
+  }, [updateGroupLayout]);
+  
+
 
   // DRAFT: exact rect of the scroll container, used to position the template grid.
   // Measured on a timer because the container's position depends on chrome
@@ -510,6 +522,7 @@ export default function Montage() {
                 onDeleteLayout={handleDeleteLayout}
               />
               {/* DRAFT: template toggle. One template, on/off. */}
+              
               <Button
                 variant={activeTemplate ? 'default' : 'outline'}
                 size="sm"
@@ -517,7 +530,7 @@ export default function Montage() {
                 aria-pressed={!!activeTemplate}
                 title={t('montage.template')}
                 aria-label={t('montage.template')}
-                onClick={() => setActiveTemplate(prev => prev ? null : 'tl-1-3-4')}
+                onClick={() => setActiveTemplate(activeTemplate ? null : 'tl-1-3-4')}
                 data-testid="montage-template-toggle"
               >
                 <LayoutTemplate className="h-4 w-4 sm:mr-2" />
@@ -632,6 +645,8 @@ export default function Montage() {
             groupedSections={groupedSections}
             scopeId={currentProfileId}
             activeTemplate={activeTemplate}
+            templateSlots={templateSlots}
+            onTemplateSlotsChange={setTemplateSlots}
             scrollRect={scrollRect}
             layout={layout}
             gridCols={gridCols}

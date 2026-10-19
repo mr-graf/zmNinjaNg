@@ -79,6 +79,11 @@ interface MontageGridSectionsProps {
    *  slots for the template's ids instead of the real monitor tiles. */
   activeTemplate?: string | null;
   
+    /** Slot id -> monitor id. Absent keys are empty slots. */
+  templateSlots?: Record<string, string>;
+  /** Persist a new slot map (empty -> filled, swap, clear). */
+  onTemplateSlotsChange?: (next: Record<string, string>) => void;
+  
   /** DRAFT: exact rect of the scroll container, used to position the template grid. */
   scrollRect?: { top: number; left: number; width: number; height: number };
     
@@ -113,6 +118,7 @@ export function MontageGridSections({
   groupedSections,
   scopeId,
   activeTemplate,
+  templateSlots,
   scrollRect,
   layout,
   gridCols,
@@ -254,15 +260,16 @@ export function MontageGridSections({
               bottom: 0,
             }}
           >
-            <TemplateGrid
-              layout={layout}
-              internalCols={internalColsForCols(gridCols)}
-              totalRows={60}
-              isFullscreen={isFullscreen}
-              onSlotContextMenu={(_slotId) => {
-                // TODO: open camera picker
-              }}
-            />
+          <TemplateGrid
+            layout={layout}
+            internalCols={internalColsForCols(gridCols)}
+            totalRows={60}
+            isFullscreen={isFullscreen}
+            templateSlots={templateSlots ?? {}}
+            onSlotContextMenu={(_slotId) => {
+           // TODO: open camera picker
+         }}
+        />
           </div>
         ) : (
                     
