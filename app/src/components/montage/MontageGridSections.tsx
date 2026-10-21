@@ -3,6 +3,7 @@
  * grouped/ungrouped tile grid with its stream-cap overflow message.
  */
 
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { NavigateFunction } from 'react-router-dom';
@@ -24,7 +25,9 @@ import { MontageTileErrorBoundary } from './MontageTileErrorBoundary';
 import { ProfileSectionList } from '../profiles/ProfileSectionList';
 import { internalColsForCols, tileIdFor, type MontageTileMonitorData } from './hooks/useMontageGrid';
 import { TemplateGrid } from './TemplateGrid';
-
+import { TemplateSlotPicker } from './TemplateSlotPicker';
+import { monitorCacheKey } from '../../stores/monitors';
+import type { MonitorRef } from '../../stores/dashboard';
 
 const WrappedGridLayout = WidthProvider(GridLayout);
 
@@ -74,19 +77,11 @@ interface MontageGridSectionsProps {
   cappedMonitors: MontageTileItem[];
   groupedSections: MontageGroupedSections | null;
   scopeId: ProfileId | null;
-  
-  /** DRAFT: active template id. When set, the grid renders placeholder
-   *  slots for the template's ids instead of the real monitor tiles. */
+  allMonitors?: Array<{ profileId?: ProfileId; item: MontageTileMonitorData }>;
   activeTemplate?: string | null;
-  
-    /** Slot id -> monitor id. Absent keys are empty slots. */
   templateSlots?: Record<string, string>;
-  /** Persist a new slot map (empty -> filled, swap, clear). */
   onTemplateSlotsChange?: (next: Record<string, string>) => void;
-  
-  /** DRAFT: exact rect of the scroll container, used to position the template grid. */
   scrollRect?: { top: number; left: number; width: number; height: number };
-    
   layout: Layout[];
   gridCols: number;
   isEditMode: boolean;
@@ -119,6 +114,7 @@ export function MontageGridSections({
   scopeId,
   activeTemplate,
   templateSlots,
+  onTemplateSlotsChange,
   scrollRect,
   layout,
   gridCols,
@@ -144,10 +140,71 @@ export function MontageGridSections({
   isTileGated,
   registerTile,
   forceViewMode,
+  allMonitors,
 }: MontageGridSectionsProps) {
   const { t } = useTranslation();
 
+  const [pickingSlotId, setPickingSlotId] = useState<string | null>(null);
+
   const layoutByTileId = new Map(layout.map((item) => [item.i, item]));
+
+  const pickedRefs: MonitorRef[] = Object.entries(templateSlots ?? {}).map(
+    ([, cacheKey]) => {
+      const tile = cappedMonitors.find((m) => String(m.Monitor.Id) === cacheKey);
+      if (tile) {
+        return { profileId: tile.profileId as MonitorRef['profileId'], monitorId: tile.Monitor.Id };
+      }
+      const idx = cacheKey.indexOf(':');
+      if (idx === -1) {
+        return { profileId: (scopeId ?? '') as MonitorRef['profileId'], monitorId: cacheKey };
+      }
+      return {
+        profileId: cacheKey.slice(0, idx) as MonitorRef['profileId'],
+        monitorId: cacheKey.slice(idx + 1),
+      };
+    },
+  );
+
+  const liveSlots = templateSlots ?? {};
+
+  const currentPick = pickingSlotId && templateSlots?.[pickingSlotId]
+    ? pickedRefs.find(
+        (ref) => monitorCacheKey(ref.profileId, ref.monitorId) === templateSlots[pickingSlotId],
+      ) ?? null
+    : null;
+
+  // Every pick except the current slot's own: those are the monitors the
+  // picker must disable, since a template slot holds one camera. Compare by
+  // monitor id alone, the same key the slot map stores, because in single
+  // mode monitorCacheKey would prepend a profileId the slot map never has.
+  const otherPicks = Object.entries(templateSlots ?? {})
+    .filter(([slotId]) => slotId !== pickingSlotId)
+    .map(([, cacheKey]) => {
+      const idx = cacheKey.indexOf(':');
+      return idx === -1
+        ? { profileId: (scopeId ?? '') as MonitorRef['profileId'], monitorId: cacheKey }
+        : {
+            profileId: cacheKey.slice(0, idx) as MonitorRef['profileId'],
+            monitorId: cacheKey.slice(idx + 1),
+          };
+    });
+  
+  
+  const handlePick = (pick: MonitorRef | null) => {
+    if (!pickingSlotId) return;
+    const next = { ...(templateSlots ?? {}) };
+    if (pick) {
+      const newKey = pick.profileId === (scopeId ?? '')
+        ? String(pick.monitorId)
+        : monitorCacheKey(pick.profileId, pick.monitorId);
+      next[pickingSlotId] = newKey;
+    } else {
+      delete next[pickingSlotId];
+    }
+    onTemplateSlotsChange?.(next);
+    setPickingSlotId(null);
+  };
+
   const globalIndexByTileId = new Map(cappedMonitors.map((item, i) => [tileIdFor(item), i]));
 
   const sharedGridLayoutProps = {
@@ -155,10 +212,6 @@ export function MontageGridSections({
     rowHeight: GRID_LAYOUT.montageRowHeight,
     margin: [0, 0] as [number, number],
     containerPadding: [0, 0] as [number, number],
-    // DRAFT: templates need free positioning. RGL's compactType only accepts
-    // 'vertical' | 'horizontal', so we cannot pass null. Instead we set
-    // `compactType` to 'horizontal' for templates - horizontal compaction
-    // does not move items vertically, which is what we need.
     compactType: activeTemplate ? ('horizontal' as const) : ('vertical' as const),
     preventCollision: true,
     isResizable: isEditMode,
@@ -248,8 +301,6 @@ export function MontageGridSections({
               );
             }}
           />
-    
-
         ) : activeTemplate && scrollRect ? (
           <div
             className="fixed z-30"
@@ -260,19 +311,69 @@ export function MontageGridSections({
               bottom: 0,
             }}
           >
-          <TemplateGrid
-            layout={layout}
-            internalCols={internalColsForCols(gridCols)}
-            totalRows={60}
-            isFullscreen={isFullscreen}
-            templateSlots={templateSlots ?? {}}
-            onSlotContextMenu={(_slotId) => {
-           // TODO: open camera picker
-         }}
-        />
+            <TemplateGrid
+              layout={layout}
+              internalCols={internalColsForCols(gridCols)}
+              totalRows={60}
+              isFullscreen={isFullscreen}
+              templateSlots={liveSlots}
+              onPickSlot={(slotId) => setPickingSlotId(slotId)}
+              renderSlot={(slotId, cacheKey) => {
+                const tile = cappedMonitors.find((m) => String(m.Monitor.Id) === cacheKey);
+                if (!tile) {
+                  const full = allMonitors?.find((m) => String(m.item.Monitor.Id) === cacheKey);
+                  if (!full) return null;
+                  const ownerProfile = resolveOwnerProfile(full.profileId);
+                  return (
+                    <MontageMonitor
+                      key={`${slotId}-${full.item.Monitor.Id}`}
+                      monitor={full.item.Monitor}
+                      status={full.item.Monitor_Status}
+                      currentProfile={ownerProfile}
+                      accessToken={accessToken}
+                      navigate={navigate}
+                      profileId={full.profileId}
+                      isFullscreen={isFullscreen}
+                      isEditing={isEditMode}
+                      objectFit={objectFit}
+                      showOverlay={showMonitorLabels}
+                      reduceStream={reduceStream}
+                      paused={paused}
+                      forceViewMode={forceViewMode}
+                      onChangeCamera={() => setPickingSlotId(slotId)}
+                    />
+                  );
+                }
+                const ownerProfile = resolveOwnerProfile(tile.profileId);
+                return (
+                  <MontageMonitor
+		    key={`${slotId}-${tile.Monitor.Id}`}
+                    monitor={tile.Monitor}
+                    status={tile.Monitor_Status}
+                    currentProfile={ownerProfile}
+                    accessToken={accessToken}
+                    navigate={navigate}
+                    profileId={tile.profileId}
+                    profileChip={tile.profileChip}
+                    isFullscreen={isFullscreen}
+                    isEditing={isEditMode}
+                    objectFit={objectFit}
+                    showOverlay={showMonitorLabels}
+                    newEventCount={resolveNewEventCount(tile)}
+                    newestEventAt={resolveNewestEventAt(tile)}
+                    reduceStream={reduceStream}
+                    paused={paused}
+                    forceViewMode={forceViewMode}
+                    onChangeCamera={() => setPickingSlotId(slotId)}
+                  />
+                );
+              }}
+              onSlotContextMenu={(_slotId) => {
+                // TODO: open camera picker on right-click
+              }}
+            />
           </div>
         ) : (
-                    
           <WrappedGridLayout layout={layout} {...sharedGridLayoutProps}>
             {cappedMonitors.map(renderTile)}
           </WrappedGridLayout>
@@ -283,6 +384,17 @@ export function MontageGridSections({
           {t('montage.stream_cap_overflow', { count: overflowCount })}
         </p>
       )}
+      <TemplateSlotPicker
+        open={pickingSlotId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPickingSlotId(null);
+        }}
+        slotId={pickingSlotId}
+        currentPick={currentPick}
+        otherPicks={otherPicks}
+        onPick={handlePick}
+      />
     </>
   );
 }
+

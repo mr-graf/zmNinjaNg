@@ -973,7 +973,13 @@
     "tile_error": "Ошибка при размещении плитки",
     "alarm_status": "Тревога на {{monitor}}",
     "template": "Шаблоны",
-    "template_pick_camera": "Выбери камеру"
+    "template_pick_camera": "Выбери камеру",
+    "template_pick_camera_button": "Выбрать камеру",
+    "template_pick_camera_title": "Выбери камеру",
+    "template_pick_camera_desc": "Выбери камеру для этого слота",
+    "template_no_monitors": "Нет доступных камер",
+    "template_slot_has_monitor": "Занято",
+    "template_change_camera": "Сменить камеру"
   },
   "notification_history": {
     "title": "Уведомления",

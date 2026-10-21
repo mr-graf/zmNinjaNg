@@ -955,7 +955,14 @@
     "tile_error": "Tile failed",
     "alarm_status": "Alarm on {{monitor}}",
     "template": "Templates",
-    "template_pick_camera": "Right-click to choose a camera"
+    "template_pick_camera": "Choose a camera",
+    "template_pick_camera_button": "Choose camera",
+    "template_pick_camera_title": "Choose a camera",
+    "template_pick_camera_desc": "Pick a camera for this slot",
+    "template_no_monitors": "No cameras available",
+    "template_slot_has_monitor": "Taken",
+    "template_change_camera": "Change camera"
+
   },
   "notification_history": {
     "title": "Notifications",

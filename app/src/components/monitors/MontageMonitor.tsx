@@ -26,7 +26,7 @@ import { Badge } from '../ui/badge';
 import { ProfileChip } from '../ui/profile-chip';
 import { LiveMonitorPlayer } from './LiveMonitorPlayer';
 import { MonitorHoverPreview } from './MonitorHoverPreview';
-import { Clock, ChartGantt, Download, Volume2, VolumeX, Pin, MoreVertical, Info } from 'lucide-react';
+import { Clock, ChartGantt, Download, Volume2, VolumeX, Pin, MoreVertical, Info, Video } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { downloadSnapshotFromElement } from '../../services/download';
 import {
@@ -139,6 +139,14 @@ interface MontageMonitorProps {
    * All-mode idle downgrade fires (refs #337).
    */
   forceViewMode?: 'streaming' | 'snapshot';
+  
+    /**
+   * DRAFT: present only in template slots. Opens the camera picker to
+   * replace this tile's monitor, without clearing the slot first. Absent
+   * outside templates, where the tile's monitor is chosen by the grid.
+   */
+  onChangeCamera?: () => void;
+
 }
 
 function MontageMonitorComponent({
@@ -166,6 +174,7 @@ function MontageMonitorComponent({
   reduceStream = false,
   paused = false,
   forceViewMode,
+  onChangeCamera,
 }: MontageMonitorProps) {
   const { t } = useTranslation();
   const zmVersion = useAuthSlice(currentProfile?.id ?? null).version;
@@ -374,7 +383,20 @@ function MontageMonitorComponent({
                 </Button>
               </PopoverAnchor>
             </DropdownMenuTrigger>
+
             <DropdownMenuContent align="end" side="bottom" className="min-w-[140px]">
+              {onChangeCamera && (
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChangeCamera();
+                  }}
+                  data-testid="montage-change-camera-btn"
+                >
+                  <Video className="h-3.5 w-3.5 mr-2" />
+                  {t('montage.template_change_camera')}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={(e) => { e.stopPropagation(); setInfoOpen(true); }}
                 data-testid="montage-info-btn"
@@ -382,6 +404,7 @@ function MontageMonitorComponent({
                 <Info className="h-3.5 w-3.5 mr-2" />
                 {t('monitors.info_button')}
               </DropdownMenuItem>
+              
               <DropdownMenuItem
                 onClick={(e) => { e.stopPropagation(); handleDownload(e as unknown as React.MouseEvent); }}
                 data-testid="montage-download-btn"

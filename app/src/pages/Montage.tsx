@@ -135,12 +135,8 @@ export default function Montage() {
     [monitors, hiddenSet]
   );
 
-  // Edit mode state lifted to page level.
   const [isEditMode, setIsEditMode] = useState(false);
 
-  // Template state now lives in the group's montage bucket, so it survives a
-  // restart and is scoped to the profile and group like every other montage
-  // preference. `bucket` comes from useMontageGroupState.
   const activeTemplate = bucket.activeTemplate ?? null;
   const templateSlots = bucket.templateSlots ?? {};
 
@@ -151,15 +147,9 @@ export default function Montage() {
   const setTemplateSlots = useCallback((next: Record<string, string>) => {
     updateGroupLayout({ templateSlots: next });
   }, [updateGroupLayout]);
-  
 
-
-  // DRAFT: exact rect of the scroll container, used to position the template grid.
-  // Measured on a timer because the container's position depends on chrome
-  // (toolbar, banners) that can change after mount.
   const [scrollRect, setScrollRect] = useState({ top: 0, left: 0, width: 0, height: 0 });
 
-  
   const paging = useMonitorPaging({
     items: visibleMonitors,
     pageSize: isEditMode ? MONITOR_PAGING.off : settings.monitorsPerPage,
@@ -223,7 +213,6 @@ export default function Montage() {
       settingKey: 'montageIsFullscreen',
     });
 
-  // Grid layout management
   const {
     layout,
     gridCols,
@@ -287,21 +276,27 @@ export default function Montage() {
     [containerRef]
   );
 
-  // Mirror the container into the ref outside any effect that reads it,
-  // so the ScrollPad gets a stable handle without tripping the
-  // react-hooks immutability rule.
   useEffect(() => {
     scrollContainerRef.current = scrollContainer;
   }, [scrollContainer]);
-  
-    // DRAFT: measure the scroll container on a timer so the template grid's
-  // fixed position tracks chrome changes (toolbar height, banners) that can
-  // happen after mount.
+
   useEffect(() => {
     if (!scrollContainer) return;
     const update = () => {
       const r = scrollContainer.getBoundingClientRect();
-      setScrollRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+      // In fullscreen the toolbar is a fixed overlay drawn on top of the scroll
+      // container. scrollRect must start below it, or the template grid covers
+      // the toolbar's buttons and its own top row is unclickable. The toolbar
+      // publishes its own testid.
+      const fullscreenToolbarPx = isFullscreen
+        ? (document.querySelector('[data-testid="montage-fullscreen-toolbar"]') as HTMLElement | null)?.offsetHeight ?? 48
+        : 0;
+      setScrollRect({
+        top: r.top + fullscreenToolbarPx,
+        left: r.left,
+        width: r.width,
+        height: r.height - fullscreenToolbarPx,
+      });
     };
     update();
     window.addEventListener('resize', update);
@@ -310,10 +305,9 @@ export default function Montage() {
       window.removeEventListener('resize', update);
       window.clearInterval(interval);
     };
-  }, [scrollContainer]);
-  
-  
-    const { isTileGated, registerTile } = useViewportGating({
+  }, [scrollContainer, isFullscreen]);
+
+  const { isTileGated, registerTile } = useViewportGating({
     enabled: isAllMode && settings.allModeViewportGating,
     root: scrollContainer,
     rootMargin: MONTAGE_GRID.viewportGatingRootMargin,
@@ -482,10 +476,9 @@ export default function Montage() {
       className={cn(
         isFullscreen
           ? 'fixed inset-0 z-40 bg-black flex flex-col'
-	  : 'flex flex-col bg-background relative h-[calc(100dvh-var(--sai-top,0px))] overflow-hidden'
+          : 'flex flex-col bg-background relative h-[calc(100dvh-var(--sai-top,0px))] overflow-hidden'
       )}
     >
-
       {!isFullscreen && (
         <>
           {showToolbar && (
@@ -521,8 +514,6 @@ export default function Montage() {
                 onLoadLayout={handleLoadLayout}
                 onDeleteLayout={handleDeleteLayout}
               />
-              {/* DRAFT: template toggle. One template, on/off. */}
-              
               <Button
                 variant={activeTemplate ? 'default' : 'outline'}
                 size="sm"
@@ -622,7 +613,6 @@ export default function Montage() {
             : 'touch-pan-y'
         )}
       >
-
         <div
           className={activeTemplate ? 'absolute inset-0' : undefined}
           style={activeTemplate ? undefined : {
@@ -631,7 +621,6 @@ export default function Montage() {
             transition: pinchZoom.isPinching ? 'none' : 'transform 0.2s ease-out',
           }}
         >
-                
           {cappedMonitors.length === 0 && !isFullscreen && !activeTemplate && (
             <div data-testid="montage-all-hidden">
               <EmptyState
@@ -642,6 +631,7 @@ export default function Montage() {
           )}
           <MontageGridSections
             cappedMonitors={cappedMonitors}
+            allMonitors={scopedMonitors}
             groupedSections={groupedSections}
             scopeId={currentProfileId}
             activeTemplate={activeTemplate}

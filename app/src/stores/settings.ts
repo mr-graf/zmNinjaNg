@@ -745,10 +745,13 @@ function fillMontageTemplateKeys(persistedState: unknown): unknown {
 
 export function migrateSettings(persistedState: unknown, version: number): unknown {
   const state = version >= 1 ? persistedState : migrateV0ToV1(persistedState);
-  return fillMontageTemplateKeys(
-    moveNativeOffOnDevice(
-      fillEventContextKeys(fillHoverPreviewSurfaces(normalizeRetiredModelIds(state)))
-    )
+  // fillMontageTemplateKeys must only run when migrating from a version that
+  // predates the template fields (v13). Running it on every store write would
+  // reset templateSlots to {} on every update, which is what was clearing the
+  // user's picks.
+  const withTemplates = version < 13 ? fillMontageTemplateKeys(state) : state;
+  return moveNativeOffOnDevice(
+    fillEventContextKeys(fillHoverPreviewSurfaces(normalizeRetiredModelIds(withTemplates)))
   );
 }
 
