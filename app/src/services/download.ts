@@ -337,6 +337,7 @@ export async function downloadSnapshotFromElement(
   }
 }
 
+
 /**
  * Mobile (Native) data URL download implementation
  */
@@ -469,4 +470,48 @@ export function downloadEventVideo(
   })();
 
   return taskId;
+}
+
+export function captureElementFrameToCanvas(
+  element: HTMLImageElement | HTMLVideoElement | null,
+  maxWidth = 128,
+): HTMLCanvasElement | null {
+  if (!element) return null;
+
+  let sourceWidth = 0;
+  let sourceHeight = 0;
+  if (element instanceof HTMLImageElement) {
+    if (!element.complete || element.naturalWidth === 0) return null;
+    sourceWidth = element.naturalWidth;
+    sourceHeight = element.naturalHeight;
+  } else if (element instanceof HTMLVideoElement) {
+    if (element.videoWidth === 0 || element.videoHeight === 0) return null;
+    sourceWidth = element.videoWidth;
+    sourceHeight = element.videoHeight;
+  } else {
+    return null;
+  }
+
+  const canvas = document.createElement('canvas');
+  const h = Math.round((sourceHeight / sourceWidth) * maxWidth) || Math.round(maxWidth * 9 / 16);
+  canvas.width = maxWidth;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  try {
+    ctx.drawImage(element, 0, 0, maxWidth, h);
+  } catch {
+    return null;
+  }
+
+  // Chrome/Electron require the drag image element to be attached to the DOM.
+  // Attach it off-screen; the caller removes it on dragend.
+  canvas.style.position = 'absolute';
+  canvas.style.left = '-9999px';
+  canvas.style.top = '-9999px';
+  canvas.style.pointerEvents = 'none';
+  document.body.appendChild(canvas);
+
+  return canvas;
 }

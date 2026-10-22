@@ -206,8 +206,16 @@ export function useMontageGrid({
     setDisplayCols(bucketGridCols);
   }, [profileId, groupKey, bucketGridCols]);
 
-  // DRAFT: when a template is active, build its layout with placeholder ids.
-  // MontageGridSections renders matching placeholder children for these ids.
+  // Reset the "we have a width" flag when the group (profile) changes, so the
+  // template effect below waits for a fresh width measurement before building
+  // the layout. Without this, switching profiles reuses the previous profile's
+  // container width and the grid ends up at the wrong scale.
+  useEffect(() => {
+    setHasWidth(false);
+    lastCalcWidthRef.current = 0;
+    currentWidthRef.current = 0;
+  }, [groupKey]);
+
   useEffect(() => {
     if (!activeTemplate) return;
     if (!hasWidth || currentWidthRef.current === 0) return;
@@ -216,19 +224,12 @@ export function useMontageGrid({
     if (!config) return;
 
     const internalCols = internalColsForCols(displayColsRef.current);
-
-    // Fixed generous row count for the draft; exact pixel geometry comes later.
-    //const totalRows = Math.max(20, internalCols);
-
-    // Fixed row count for the draft; the geometry does not depend on it.
     const totalRows = 60;
-    
     const templateLayout = buildTemplateLayout(config, internalCols, totalRows);
 
     initializedRef.current = true;
     setLayout(templateLayout);
-  }, [activeTemplate, hasWidth, monitors.length]);
-
+  }, [activeTemplate, hasWidth, groupKey]);
 
   useEffect(() => {
     // DRAFT: an active template owns the layout; the normal path stays out.
@@ -327,6 +328,7 @@ export function useMontageGrid({
 
   const handleWidthChange = useCallback(
     (width: number) => {
+      console.log('[useMontageGrid] handleWidthChange, width:', width);
       const isFirstMeasurement = lastCalcWidthRef.current === 0;
       currentWidthRef.current = width;
 

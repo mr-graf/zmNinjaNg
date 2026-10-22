@@ -188,8 +188,24 @@ export function MontageGridSections({
             monitorId: cacheKey.slice(idx + 1),
           };
     });
-  
-  
+
+  const handleSwapSlots = (fromSlotId: string, toSlotId: string) => {
+    const fromKey = templateSlots?.[fromSlotId];
+    const toKey = templateSlots?.[toSlotId];
+    const next = { ...(templateSlots ?? {}) };
+    if (toKey) {
+      next[fromSlotId] = toKey;
+    } else {
+      delete next[fromSlotId];
+    }
+    if (fromKey) {
+      next[toSlotId] = fromKey;
+    } else {
+      delete next[toSlotId];
+    }
+    onTemplateSlotsChange?.(next);
+  };
+
   const handlePick = (pick: MonitorRef | null) => {
     if (!pickingSlotId) return;
     const next = { ...(templateSlots ?? {}) };
@@ -206,7 +222,8 @@ export function MontageGridSections({
   };
 
   const globalIndexByTileId = new Map(cappedMonitors.map((item, i) => [tileIdFor(item), i]));
-
+  
+  console.log('[MontageGridSections] render, scopeId:', scopeId, 'gridCols:', gridCols, 'internalCols:', internalColsForCols(gridCols));
   const sharedGridLayoutProps = {
     cols: internalColsForCols(gridCols),
     rowHeight: GRID_LAYOUT.montageRowHeight,
@@ -224,13 +241,14 @@ export function MontageGridSections({
   };
 
   const renderTile = (item: MontageTileItem): ReactNode => {
+  console.log('[renderTile] scopeId:', scopeId, 'tileId:', tileIdFor(item));
     const { Monitor, Monitor_Status, profileId, profileChip } = item;
     const tileId = tileIdFor(item);
     const idx = globalIndexByTileId.get(tileId) ?? -1;
     const ownerProfile = resolveOwnerProfile(profileId);
     return (
       <div
-        key={tileId}
+	key={`${scopeId}-${tileId}`}
         className={cn(
           "relative focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
           isMonitorPinned(tileId) && "pin-locked",
@@ -319,6 +337,7 @@ export function MontageGridSections({
               templateSlots={liveSlots}
               onPickSlot={(slotId) => setPickingSlotId(slotId)}
               renderSlot={(slotId, cacheKey) => {
+              console.log('[renderSlot] slotId:', slotId, 'cacheKey:', cacheKey, 'scopeId:', scopeId);
                 const tile = cappedMonitors.find((m) => String(m.Monitor.Id) === cacheKey);
                 if (!tile) {
                   const full = allMonitors?.find((m) => String(m.item.Monitor.Id) === cacheKey);
@@ -326,7 +345,7 @@ export function MontageGridSections({
                   const ownerProfile = resolveOwnerProfile(full.profileId);
                   return (
                     <MontageMonitor
-                      key={`${slotId}-${full.item.Monitor.Id}`}
+                      key={`${scopeId}-${slotId}-${full.item.Monitor.Id}`}
                       monitor={full.item.Monitor}
                       status={full.item.Monitor_Status}
                       currentProfile={ownerProfile}
@@ -341,13 +360,22 @@ export function MontageGridSections({
                       paused={paused}
                       forceViewMode={forceViewMode}
                       onChangeCamera={() => setPickingSlotId(slotId)}
+                      dragHandleProps={
+                        isEditMode ? {
+                          draggable: true,
+                          onDragStart: (e) => {
+                            e.dataTransfer.setData('text/slot-id', slotId);
+                            e.dataTransfer.effectAllowed = 'move';
+                          },
+                        } : undefined
+                      }
                     />
                   );
                 }
                 const ownerProfile = resolveOwnerProfile(tile.profileId);
                 return (
                   <MontageMonitor
-		    key={`${slotId}-${tile.Monitor.Id}`}
+                    key={`${scopeId}-${slotId}-${tile.Monitor.Id}`}                    
                     monitor={tile.Monitor}
                     status={tile.Monitor_Status}
                     currentProfile={ownerProfile}
@@ -365,12 +393,22 @@ export function MontageGridSections({
                     paused={paused}
                     forceViewMode={forceViewMode}
                     onChangeCamera={() => setPickingSlotId(slotId)}
+                    dragHandleProps={
+                      isEditMode ? {
+                        draggable: true,
+                        onDragStart: (e) => {
+                          e.dataTransfer.setData('text/slot-id', slotId);
+                          e.dataTransfer.effectAllowed = 'move';
+                        },
+                      } : undefined
+                    }
                   />
                 );
               }}
               onSlotContextMenu={(_slotId) => {
                 // TODO: open camera picker on right-click
               }}
+              onSwapSlots={handleSwapSlots}
             />
           </div>
         ) : (
@@ -397,4 +435,3 @@ export function MontageGridSections({
     </>
   );
 }
-

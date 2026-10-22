@@ -26,9 +26,9 @@ import { Badge } from '../ui/badge';
 import { ProfileChip } from '../ui/profile-chip';
 import { LiveMonitorPlayer } from './LiveMonitorPlayer';
 import { MonitorHoverPreview } from './MonitorHoverPreview';
-import { Clock, ChartGantt, Download, Volume2, VolumeX, Pin, MoreVertical, Info, Video } from 'lucide-react';
+import { Clock, ChartGantt, Download, Volume2, VolumeX, Pin, MoreVertical, Info, Video, GripVertical } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { downloadSnapshotFromElement } from '../../services/download';
+import { downloadSnapshotFromElement, captureElementFrameToCanvas } from '../../services/download';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -139,14 +139,20 @@ interface MontageMonitorProps {
    * All-mode idle downgrade fires (refs #337).
    */
   forceViewMode?: 'streaming' | 'snapshot';
-  
-    /**
+
+  /**
    * DRAFT: present only in template slots. Opens the camera picker to
    * replace this tile's monitor, without clearing the slot first. Absent
    * outside templates, where the tile's monitor is chosen by the grid.
    */
   onChangeCamera?: () => void;
 
+  /**
+   * DRAFT: props to spread on the drag handle inside the tile header.
+   * Present only inside a template slot in edit mode, where the user can
+   * drag a camera onto another slot to swap them. Absent everywhere else.
+   */
+  dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
 function MontageMonitorComponent({
@@ -175,6 +181,7 @@ function MontageMonitorComponent({
   paused = false,
   forceViewMode,
   onChangeCamera,
+  dragHandleProps,
 }: MontageMonitorProps) {
   const { t } = useTranslation();
   const zmVersion = useAuthSlice(currentProfile?.id ?? null).version;
@@ -294,6 +301,29 @@ function MontageMonitorComponent({
 
         {/* Monitor status and name */}
         <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
+          {dragHandleProps && (
+            <div
+              {...dragHandleProps}
+              className="cursor-grab active:cursor-grabbing shrink-0 touch-none"
+              data-testid="montage-drag-handle"
+              onDragStart={(e) => {
+                dragHandleProps.onDragStart?.(e);
+                const canvas = captureElementFrameToCanvas(mediaRef.current);
+                if (canvas) {
+                  e.dataTransfer.setDragImage(canvas, canvas.width / 2, canvas.height / 2);
+                  // Remove the off-screen canvas once the drag ends, so the
+                  // DOM does not accumulate them across drags.
+                  const cleanup = () => {
+                    canvas.remove();
+                    window.removeEventListener('dragend', cleanup);
+                  };
+                  window.addEventListener('dragend', cleanup, { once: true });
+                }
+              }}
+            >
+              <GripVertical className="h-3 w-3 text-muted-foreground" />
+            </div>
+          )}
           <Badge
             variant="default"
             className={cn(
@@ -383,7 +413,6 @@ function MontageMonitorComponent({
                 </Button>
               </PopoverAnchor>
             </DropdownMenuTrigger>
-
             <DropdownMenuContent align="end" side="bottom" className="min-w-[140px]">
               {onChangeCamera && (
                 <DropdownMenuItem
@@ -404,7 +433,6 @@ function MontageMonitorComponent({
                 <Info className="h-3.5 w-3.5 mr-2" />
                 {t('monitors.info_button')}
               </DropdownMenuItem>
-              
               <DropdownMenuItem
                 onClick={(e) => { e.stopPropagation(); handleDownload(e as unknown as React.MouseEvent); }}
                 data-testid="montage-download-btn"

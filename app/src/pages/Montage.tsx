@@ -473,12 +473,14 @@ export default function Montage() {
 
   return (
     <div
+      key={currentProfileId ?? 'no-profile'}
       className={cn(
         isFullscreen
           ? 'fixed inset-0 z-40 bg-black flex flex-col'
           : 'flex flex-col bg-background relative h-[calc(100dvh-var(--sai-top,0px))] overflow-hidden'
       )}
     >
+
       {!isFullscreen && (
         <>
           {showToolbar && (

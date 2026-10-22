@@ -19,9 +19,11 @@ interface TemplateGridProps {
   isFullscreen?: boolean;
   templateSlots?: Record<string, string>;
   onPickSlot?: (slotId: string) => void;
-  /** DRAFT: resolves a slot's cache key to a real monitor for rendering. */
   renderSlot?: (slotId: string, cacheKey: string) => React.ReactNode | null;
   onSlotContextMenu?: (slotId: string, event: React.MouseEvent) => void;
+  /** DRAFT: swap the cameras in two slots. Called when a tile is dropped on
+   *  another slot. */
+  onSwapSlots?: (fromSlotId: string, toSlotId: string) => void;
   className?: string;
 }
 
@@ -35,6 +37,7 @@ export function TemplateGrid({
   renderSlot,
   onSlotContextMenu,
   className,
+  onSwapSlots,
 }: TemplateGridProps) {
   const { t } = useTranslation();
 
@@ -66,11 +69,26 @@ export function TemplateGrid({
               gridColumn: `${item.x + 1} / span ${item.w}`,
               gridRow: `${item.y + 1} / span ${item.h}`,
             }}
+
             data-testid={`montage-template-slot-${slotId}`}
             data-monitor-id={monitorId ?? ''}
             onContextMenu={(e) => {
               e.preventDefault();
               onSlotContextMenu?.(slotId, e);
+            }}
+            onDragOver={(e) => {
+              if (!onSwapSlots) return;
+              if (e.dataTransfer.types.includes('text/slot-id')) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+              }
+            }}
+            onDrop={(e) => {
+              if (!onSwapSlots) return;
+              const fromSlotId = e.dataTransfer.getData('text/slot-id');
+              if (!fromSlotId || fromSlotId === slotId) return;
+              e.preventDefault();
+              onSwapSlots(fromSlotId, slotId);
             }}
           >
             {rendered ? (
@@ -78,7 +96,7 @@ export function TemplateGrid({
                 {rendered}
               </div>
             ) : (
-              <>
+               <div className="w-full h-full flex items-center justify-center">
                 <span
                   className={cn(
                     'text-xs text-center leading-tight px-6',
@@ -106,7 +124,7 @@ export function TemplateGrid({
                 >
                   <MoreVertical className="h-3 w-3" />
                 </Button>
-              </>
+              </div>
             )}
           </div>
         );
