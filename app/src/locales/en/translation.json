@@ -957,6 +957,7 @@
     "template": "Templates",
     "template_pick_camera": "Choose a camera",
     "template_pick_camera_button": "Choose camera",
+    "template_drag_hint": "Drag to swap cameras",
     "template_pick_camera_title": "Choose a camera",
     "template_pick_camera_desc": "Pick a camera for this slot",
     "template_no_monitors": "No cameras available",

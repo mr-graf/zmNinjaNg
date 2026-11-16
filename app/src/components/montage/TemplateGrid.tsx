@@ -41,6 +41,12 @@ export function TemplateGrid({
 }: TemplateGridProps) {
   const { t } = useTranslation();
 
+  console.log('[TemplateGrid props]', {
+    internalCols,
+    layoutLen: layout.length,
+    firstItem: layout[0] ? { x: layout[0].x, w: layout[0].w, y: layout[0].y, h: layout[0].h } : null,
+  });
+
   return (
     <div
       className={cn('grid absolute inset-0', className)}

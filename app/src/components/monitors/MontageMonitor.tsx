@@ -305,6 +305,10 @@ function MontageMonitorComponent({
             <div
               {...dragHandleProps}
               className="cursor-grab active:cursor-grabbing shrink-0 touch-none"
+              title={t('montage.template_drag_hint')}
+              aria-label={t('montage.template_drag_hint')}
+              aria-roledescription={t('montage.template_drag_hint')}
+              role="button"
               data-testid="montage-drag-handle"
               onDragStart={(e) => {
                 dragHandleProps.onDragStart?.(e);

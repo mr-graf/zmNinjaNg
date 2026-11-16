@@ -216,6 +216,7 @@ export function useMontageGrid({
     currentWidthRef.current = 0;
   }, [groupKey]);
 
+
   useEffect(() => {
     if (!activeTemplate) return;
     if (!hasWidth || currentWidthRef.current === 0) return;
@@ -223,13 +224,13 @@ export function useMontageGrid({
     const config = TEMPLATES[activeTemplate];
     if (!config) return;
 
-    const internalCols = internalColsForCols(displayColsRef.current);
+    const internalCols = internalColsForCols(displayCols);
     const totalRows = 60;
     const templateLayout = buildTemplateLayout(config, internalCols, totalRows);
 
     initializedRef.current = true;
     setLayout(templateLayout);
-  }, [activeTemplate, hasWidth, groupKey]);
+  }, [activeTemplate, hasWidth, groupKey, displayCols]);
 
   useEffect(() => {
     // DRAFT: an active template owns the layout; the normal path stays out.

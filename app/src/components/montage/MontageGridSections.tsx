@@ -7,7 +7,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { NavigateFunction } from 'react-router-dom';
-import GridLayout, { WidthProvider } from 'react-grid-layout';
+import GridLayout from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -29,7 +29,6 @@ import { TemplateSlotPicker } from './TemplateSlotPicker';
 import { monitorCacheKey } from '../../stores/monitors';
 import type { MonitorRef } from '../../stores/dashboard';
 
-const WrappedGridLayout = WidthProvider(GridLayout);
 
 export interface MontageTileItem extends MontageTileMonitorData {
   profileChip?: string;
@@ -313,9 +312,9 @@ export function MontageGridSections({
                 .map((item) => layoutByTileId.get(tileIdFor(item)))
                 .filter((item): item is Layout => !!item);
               return (
-                <WrappedGridLayout layout={sectionLayout} {...sharedGridLayoutProps}>
+                <GridLayout layout={sectionLayout} {...sharedGridLayoutProps}>
                   {items.map(renderTile)}
-                </WrappedGridLayout>
+                </GridLayout>
               );
             }}
           />
@@ -351,7 +350,7 @@ export function MontageGridSections({
                       currentProfile={ownerProfile}
                       accessToken={accessToken}
                       navigate={navigate}
-                      profileId={full.profileId}
+                      profileId={full.profileId ?? scopeId ?? undefined}
                       isFullscreen={isFullscreen}
                       isEditing={isEditMode}
                       objectFit={objectFit}
@@ -381,7 +380,7 @@ export function MontageGridSections({
                     currentProfile={ownerProfile}
                     accessToken={accessToken}
                     navigate={navigate}
-                    profileId={tile.profileId}
+                    profileId={tile.profileId ?? scopeId ?? undefined}
                     profileChip={tile.profileChip}
                     isFullscreen={isFullscreen}
                     isEditing={isEditMode}
@@ -412,10 +411,22 @@ export function MontageGridSections({
             />
           </div>
         ) : (
-          <WrappedGridLayout layout={layout} {...sharedGridLayoutProps}>
-            {cappedMonitors.map(renderTile)}
-          </WrappedGridLayout>
+          <>
+            {(() => {
+              console.log('[GridLayout props]', {
+                width: (sharedGridLayoutProps as any).width,
+                cols: sharedGridLayoutProps.cols,
+                layoutLen: layout.length,
+                firstItem: layout[0] ? { x: layout[0].x, w: layout[0].w, y: layout[0].y, h: layout[0].h } : null,
+              });
+              return null;
+            })()}
+            <GridLayout layout={layout} {...sharedGridLayoutProps}>
+              {cappedMonitors.map(renderTile)}
+            </GridLayout>
+          </>
         )}
+
       </div>
       {overflowCount > 0 && (
         <p className="text-sm text-muted-foreground mt-3 px-1" data-testid="montage-stream-cap-overflow">

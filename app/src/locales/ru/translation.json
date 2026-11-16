@@ -975,6 +975,7 @@
     "template": "Шаблоны",
     "template_pick_camera": "Выбери камеру",
     "template_pick_camera_button": "Выбрать камеру",
+    "template_drag_hint": "Перетащить, чтобы обменять камеры",    
     "template_pick_camera_title": "Выбери камеру",
     "template_pick_camera_desc": "Выбери камеру для этого слота",
     "template_no_monitors": "Нет доступных камер",

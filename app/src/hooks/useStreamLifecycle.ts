@@ -245,12 +245,26 @@ export function useStreamLifecycle({
   // render, see the stream this hook currently owns.
   const cleanupParamsRef = useRef<StreamCleanupParams>(buildCleanupParams(0));
 
-  // Regenerate connKey on mount or when monitorId changes
+  // Regenerate connKey on mount, when monitorId changes, or when the owning
+  // profile changes. A profile switch means a different ZM server, so the
+  // connkey minted against the old server is dead on the new one: the MJPEG
+  // stream would mount on a key the new server never issued and stay blank
+  // until a full unmount/remount (refs #337). The reset is a plain
+  // regenerate, not a quit-the-old-key path - quitStreamForParams already
+  // runs on a profile switch via the active-streams registry, so the old
+  // server's stream is closed there, and the old profile's auth trust may
+  // already be gone by the time this effect runs.
+  const prevProfileIdRef = useRef<ProfileId | null | undefined>(profileId);
   useEffect(() => {
     if (!enabled || !monitorId) return;
 
-    // If we already have a connKey for this monitor, don't regenerate
-    // (only regenerate when first enabled or monitor changes)
+    const profileChanged =
+      !isInitialMountRef.current && prevProfileIdRef.current !== profileId;
+    prevProfileIdRef.current = profileId;
+
+    // If we already have a connKey for this monitor on the same profile, don't
+    // regenerate. A profile change is the exception: the stored key belongs to
+    // a different server and must be replaced.
     //
     // Despite that second line, a monitorId change on a live hook returns here
     // rather than minting for the new monitor, and the old monitor's key is
@@ -260,7 +274,7 @@ export function useStreamLifecycle({
     // fix for the feed lagging a monitor behind (see MonitorDetail's `key=`
     // comment, refs #201). Left alone deliberately - changing it would move a
     // teardown that the keyed remount already handles.
-    if (connKey !== 0 && !isInitialMountRef.current) return;
+    if (connKey !== 0 && !isInitialMountRef.current && !profileChanged) return;
 
     // Send CMD_QUIT for previous connKey before generating new one (skip on initial mount)
     if (
@@ -311,7 +325,7 @@ export function useStreamLifecycle({
     // port this key belongs to.
     cleanupParamsRef.current = buildCleanupParams(newKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monitorId, enabled]);
+  }, [monitorId, enabled, profileId]);
 
   // Refresh the cleanup params as the profile's values change, but only while
   // enabled. Once disabled the hook owns no stream, so the ref must keep the
