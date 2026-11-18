@@ -412,15 +412,6 @@ export function MontageGridSections({
           </div>
         ) : (
           <>
-            {(() => {
-              console.log('[GridLayout props]', {
-                width: (sharedGridLayoutProps as any).width,
-                cols: sharedGridLayoutProps.cols,
-                layoutLen: layout.length,
-                firstItem: layout[0] ? { x: layout[0].x, w: layout[0].w, y: layout[0].y, h: layout[0].h } : null,
-              });
-              return null;
-            })()}
             <GridLayout layout={layout} {...sharedGridLayoutProps}>
               {cappedMonitors.map(renderTile)}
             </GridLayout>
